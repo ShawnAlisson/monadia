@@ -14,7 +14,10 @@ import {
   requiresOnchainVerification,
   verifyCivilizationTransaction,
 } from "@/lib/contracts/verify";
-import { readOnchainCitizenState } from "@/lib/contracts/state";
+import {
+  readOnchainCitizenMembership,
+  readOnchainCitizenState,
+} from "@/lib/contracts/state";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +25,8 @@ const bodySchema = z.object({
   walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
   name: z.string().min(1).max(32),
   txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/).optional(),
+  /** When true, sync an already-joined on-chain citizen without a new join tx. */
+  syncExisting: z.boolean().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -32,10 +37,46 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
+
+  const existing = await getCitizenByWallet(parsed.data.walletAddress);
+  if (existing) {
+    return NextResponse.json({ citizen: existing, replayed: true });
+  }
+
   let onchainState: Awaited<ReturnType<typeof readOnchainCitizenState>> = null;
+
   if (requiresOnchainVerification()) {
+    const membership = await readOnchainCitizenMembership(
+      parsed.data.walletAddress as `0x${string}`,
+    );
+
+    // Returning players: already joined on Monad — sync into the read model.
+    if (membership?.joined && !membership.isAI) {
+      const onchainName = membership.name?.trim() || parsed.data.name;
+      onchainState = await readOnchainCitizenState(
+        parsed.data.walletAddress as `0x${string}`,
+      );
+      const citizen = await joinHuman(
+        parsed.data.walletAddress,
+        onchainName,
+        undefined,
+        onchainState,
+      );
+      return NextResponse.json({ citizen, synced: true });
+    }
+
+    if (parsed.data.syncExisting) {
+      return NextResponse.json(
+        { error: "This wallet has not joined Civilization on Monad yet." },
+        { status: 400 },
+      );
+    }
+
     if (!parsed.data.txHash) {
-      return NextResponse.json({ error: "A confirmed Monad join transaction is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "A confirmed Monad join transaction is required" },
+        { status: 400 },
+      );
     }
     try {
       const verified = await verifyCivilizationTransaction({
@@ -62,23 +103,26 @@ export async function POST(req: NextRequest) {
         );
       }
     } catch (error) {
-      return NextResponse.json({ error: error instanceof Error ? error.message : "Could not verify Monad transaction" }, { status: 400 });
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Could not verify Monad transaction" },
+        { status: 400 },
+      );
     }
-  }
-  if (requiresOnchainVerification() && parsed.data.txHash) {
+
     if (await hasRecordedTransaction(parsed.data.txHash)) {
-      const existing = await getCitizenByWallet(parsed.data.walletAddress);
-      if (existing) return NextResponse.json({ citizen: existing, replayed: true });
+      const replayed = await getCitizenByWallet(parsed.data.walletAddress);
+      if (replayed) return NextResponse.json({ citizen: replayed, replayed: true });
     }
     if (!(await claimTransaction(parsed.data.txHash))) {
-      const existing = await getCitizenByWallet(parsed.data.walletAddress);
-      if (existing) return NextResponse.json({ citizen: existing, replayed: true });
+      const claimed = await getCitizenByWallet(parsed.data.walletAddress);
+      if (claimed) return NextResponse.json({ citizen: claimed, replayed: true });
       return NextResponse.json(
         { error: "This Monad transaction is already being synchronized. Retry in a moment." },
         { status: 409 },
       );
     }
   }
+
   const citizen = await joinHuman(
     parsed.data.walletAddress,
     parsed.data.name,

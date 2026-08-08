@@ -16,7 +16,6 @@ export function ConnectWallet({ label = "Connect Wallet" }: { label?: string }) 
   const { disconnect } = useDisconnect();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const [open, setOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   if (isConnected && address) {
@@ -41,38 +40,29 @@ export function ConnectWallet({ label = "Connect Wallet" }: { label?: string }) 
     );
   }
 
-  const unique = connectors.filter(
-    (c, i, arr) => arr.findIndex((x) => x.id === c.id) === i,
-  );
+  // Prefer injected (MetaMask / browser wallet). Inject alone is enough — it
+  // opens MetaMask when present. Extra connector dropdown / MetaMask SDK entry
+  // is intentionally not shown.
+  const injected = connectors.find((c) => c.id === "injected") ?? connectors[0];
 
-  async function onConnect(connectorId: string) {
+  async function onConnectInjected() {
     setLocalError(null);
     reset();
-    const connector = unique.find((c) => c.id === connectorId);
-    if (!connector) {
+    if (!injected) {
       setLocalError("No wallet connector available.");
       return;
     }
 
-    // MetaMask / injected need a browser extension
     const hasInjectedWallet = typeof window !== "undefined" && "ethereum" in window;
-    if (
-      (connector.id === "metaMaskSDK" || connector.id === "injected") &&
-      !hasInjectedWallet
-    ) {
-      setLocalError(
-        "No browser wallet found. Install MetaMask, then refresh — or use WalletConnect.",
-      );
-      setOpen(true);
+    if (!hasInjectedWallet) {
+      setLocalError("No browser wallet found. Install MetaMask, then refresh.");
       return;
     }
 
     try {
-      await connect({ connector, chainId: monadTestnet.id });
-      setOpen(false);
+      await connect({ connector: injected, chainId: monadTestnet.id });
     } catch (e) {
       setLocalError(e instanceof Error ? e.message : "Connection failed");
-      setOpen(true);
     }
   }
 
@@ -81,43 +71,30 @@ export function ConnectWallet({ label = "Connect Wallet" }: { label?: string }) 
       <button
         className="btn-primary"
         disabled={isPending}
-        onClick={() => {
-          setOpen((v) => !v);
-          setLocalError(null);
-        }}
+        onClick={() => void onConnectInjected()}
       >
         {isPending ? "Connecting…" : label}
       </button>
 
+      {/*
+      Extra wallet dropdown (MetaMask SDK / WalletConnect list) — commented out
+      because injected already triggers MetaMask.
+
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-72 rounded-xl border border-cyan-400/20 bg-[#071018] p-2 shadow-2xl">
-          <p className="px-2 py-1 text-[11px] uppercase tracking-wider text-slate-500">
-            Choose wallet
-          </p>
+        <div className="absolute right-0 z-50 mt-2 w-72 rounded-xl border ...">
           {unique.map((connector) => (
-            <button
-              key={connector.id}
-              className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm text-cyan-50 hover:bg-cyan-400/10"
-              disabled={isPending}
-              onClick={() => void onConnect(connector.id)}
-            >
-              <span>{connector.name}</span>
-              <span className="text-[10px] uppercase text-slate-500">{connector.id}</span>
+            <button key={connector.id} onClick={() => void onConnect(connector.id)}>
+              {connector.name}
             </button>
           ))}
-          {!process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ||
-          process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID.includes("your_") ? (
-            <p className="mt-1 px-2 pb-1 text-[11px] leading-relaxed text-slate-500">
-              Tip: install the MetaMask extension for one-click connect. Optional: set a real
-              WalletConnect Project ID in `.env.local`.
-            </p>
-          ) : null}
-          {(localError || error?.message) && (
-            <p className="mt-1 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-              {localError || error?.message}
-            </p>
-          )}
         </div>
+      )}
+      */}
+
+      {(localError || error?.message) && (
+        <p className="mt-2 max-w-xs rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+          {localError || error?.message}
+        </p>
       )}
     </div>
   );

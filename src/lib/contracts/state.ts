@@ -16,6 +16,12 @@ export type OnchainCitizenState = {
   inventory: { food: number; iron: number; energy: number };
 };
 
+export type OnchainCitizenMembership = {
+  name: string;
+  joined: boolean;
+  isAI: boolean;
+};
+
 export type OnchainMarketState = {
   food: number;
   iron: number;
@@ -23,6 +29,30 @@ export type OnchainMarketState = {
   treasuryMon: number;
   tokenTreasuryMda: number;
 };
+
+/** Lightweight membership check used to skip re-join when the wallet is already a citizen. */
+export async function readOnchainCitizenMembership(
+  address: Address,
+): Promise<OnchainCitizenMembership | null> {
+  if (!requiresOnchainVerification()) return null;
+  try {
+    const client = createPublicClient({ chain: monadTestnet, transport: http(MONAD_RPC) });
+    const citizen = await client.readContract({
+      address: CIVILIZATION_ADDRESS,
+      abi: civilizationAbi,
+      functionName: "citizens",
+      args: [address],
+    });
+    return {
+      name: citizen[0],
+      isAI: citizen[1],
+      joined: citizen[2],
+    };
+  } catch (error) {
+    console.warn("[monadia] Could not read on-chain membership", error);
+    return null;
+  }
+}
 
 /**
  * Reads public post-settlement state. It is used only after a receipt is

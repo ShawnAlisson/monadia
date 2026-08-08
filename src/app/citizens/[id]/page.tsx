@@ -6,6 +6,7 @@ import { parseEther } from "viem";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import type { Citizen, CivilizationEvent } from "@/lib/types";
 import { CIVILIZATION_ADDRESS, civilizationAbi, EXPLORER_URL } from "@/lib/contracts/abi";
+import { AgentInteractPanel } from "@/components/AgentInteractPanel";
 
 export default function CitizenProfilePage() {
   const params = useParams<{ id: string }>();
@@ -160,9 +161,24 @@ export default function CitizenProfilePage() {
               >
                 {isPending || submitting ? "Confirming…" : `Hire ${citizen.name}`}
               </button>
-              {msg && <p className={`mt-2 text-sm ${msg.includes("working") ? "text-emerald-300" : "text-rose-300"}`}>{msg}</p>}
+              {msg && (
+                <p
+                  className={`mt-2 text-sm ${msg.includes("working") ? "text-emerald-300" : "text-rose-300"}`}
+                >
+                  {msg}
+                </p>
+              )}
             </div>
           )}
+        </div>
+      )}
+
+      {citizen.type === "AI" && (
+        <div className="panel">
+          <h2 className="font-[family-name:var(--font-display)] text-sm tracking-[0.25em] text-cyan-300">
+            AGENT SKILLS
+          </h2>
+          <AgentInteractPanel agentId={citizen.id} agentName={citizen.name} />
         </div>
       )}
 

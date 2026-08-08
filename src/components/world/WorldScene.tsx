@@ -199,20 +199,28 @@ function Citizens({
   selection,
   onSelect,
   simMap,
+  excludeWallet,
 }: {
   citizens: Citizen[];
   events: CivilizationEvent[];
   selection: WorldSelection;
   onSelect: (s: WorldSelection) => void;
   simMap: Map<string, AgentSim>;
+  /** Connected player's wallet — rendered as the local Player, not a second avatar. */
+  excludeWallet?: string | null;
 }) {
   const [bubbles, setBubbles] = useState<Record<string, Bubble>>({});
   const seenEvents = useRef<Set<string>>(new Set());
   const firstLoad = useRef(true);
 
-  // ensure sim state exists for every citizen
+  const isSelf = (c: Citizen) =>
+    Boolean(
+      excludeWallet && c.walletAddress.toLowerCase() === excludeWallet.toLowerCase(),
+    );
+
+  // ensure sim state exists for every other human citizen
   for (const c of citizens) {
-    if (c.type === "AI") continue;
+    if (c.type === "AI" || isSelf(c)) continue;
     if (!simMap.has(c.id)) {
       const home = homePosition(c);
       simMap.set(c.id, {
@@ -228,7 +236,7 @@ function Citizens({
   useFrame(() => {
     const now = performance.now();
     for (const c of citizens) {
-      if (c.type === "AI") continue;
+      if (c.type === "AI" || isSelf(c)) continue;
       const sim = simMap.get(c.id);
       if (!sim || now < sim.nextThink) continue;
       sim.nextThink = now + 4000 + rand(c.id, Math.floor(now / 1000)) * 9000;
@@ -303,6 +311,7 @@ function Citizens({
   return (
     <>
       {citizens.map((c) => {
+        if (isSelf(c)) return null;
         const sim = simMap.get(c.id);
         if (c.type === "AI") {
           return (
@@ -356,7 +365,7 @@ function MarketPlaza() {
     <group position={[p.x, 0, p.z]}>
       <mesh position={[0, 0.08, 0]} receiveShadow={false}>
         <cylinderGeometry args={[7.5, 8, 0.16, 36]} />
-        <meshStandardMaterial color="#0a1826" roughness={0.85} />
+        <meshStandardMaterial color="#152838" roughness={0.8} />
       </mesh>
       {/* hologram ring */}
       <mesh ref={ring} position={[0, 3.4, 0]} rotation={[Math.PI / 2, 0, 0]}>
@@ -433,7 +442,7 @@ function Farm() {
     <group position={[p.x, 0, p.z]}>
       <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[14, 12]} />
-        <meshStandardMaterial color="#0c2416" roughness={1} />
+        <meshStandardMaterial color="#1a3d28" roughness={1} />
       </mesh>
       {Array.from({ length: 5 }).map((_, i) => (
         <mesh key={i} position={[-4.8 + i * 2.4, 0.35, 0]}>
@@ -719,7 +728,7 @@ function FillerCity() {
     <>
       <instancedMesh ref={bodyRef} args={[undefined, undefined, towers.length]}>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color="#122334" roughness={0.85} />
+        <meshStandardMaterial color="#1a3348" roughness={0.8} />
       </instancedMesh>
       <instancedMesh ref={capRef} args={[undefined, undefined, towers.length]}>
         <boxGeometry args={[1, 1, 1]} />
@@ -754,11 +763,11 @@ function Roads() {
         <mesh key={r.key} position={[r.x, 0.02, r.z]} rotation={[-Math.PI / 2, 0, -r.angle]}>
           <planeGeometry args={[1.6, r.len]} />
           <meshStandardMaterial
-            color="#0a1c2a"
+            color="#163246"
             emissive="#3de6c1"
-            emissiveIntensity={0.08}
+            emissiveIntensity={0.14}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
         </mesh>
       ))}
@@ -770,7 +779,17 @@ function Roads() {
 /* Camera rig: eases the orbit target toward the selection             */
 /* ------------------------------------------------------------------ */
 
-function Player({ player, onNearby, touchDir }: { player: PlayerState; onNearby: (poi: PoiKey | null) => void; touchDir: React.RefObject<{ x: number; z: number }> }) {
+function Player({
+  player,
+  onNearby,
+  touchDir,
+  label,
+}: {
+  player: PlayerState;
+  onNearby: (poi: PoiKey | null) => void;
+  touchDir: React.RefObject<{ x: number; z: number }>;
+  label?: string;
+}) {
   const group = useRef<THREE.Group>(null);
   const visor = useRef<THREE.Mesh>(null);
   const { camera } = useThree();
@@ -857,7 +876,7 @@ function Player({ player, onNearby, touchDir }: { player: PlayerState; onNearby:
         <meshBasicMaterial color="#60f5d2" transparent opacity={0.8} />
       </mesh>
       <pointLight position={[0, 1.4, 0]} color="#3de6c1" intensity={2.5} distance={5} />
-      <TextSprite text="YOU" color="#d4fff7" height={0.55} position={[0, 2.1, 0]} />
+      <TextSprite text={label ? `YOU · ${label}` : "YOU"} color="#d4fff7" height={0.55} position={[0, 2.1, 0]} />
     </group>
   );
 }
@@ -867,7 +886,7 @@ function SceneSetup() {
   useEffect(() => {
     gl.outputColorSpace = THREE.SRGBColorSpace;
     gl.toneMapping = THREE.ACESFilmicToneMapping;
-    gl.toneMappingExposure = 1.08;
+    gl.toneMappingExposure = 1.22;
     const globalWindow = window as typeof window & {
       __THREE_GAME_DIAGNOSTICS__?: { renderer: THREE.WebGLInfo; world: { dpr: number; postPasses: number } };
     };
@@ -927,12 +946,16 @@ export default function WorldScene({
   events,
   selection,
   onSelect,
+  playerWallet,
+  playerName,
 }: {
   citizens: Citizen[];
   businesses: Business[];
   events: CivilizationEvent[];
   selection: WorldSelection;
   onSelect: (s: WorldSelection) => void;
+  playerWallet?: string | null;
+  playerName?: string | null;
 }) {
   const router = useRouter();
   const simMap = useRef(new Map<string, AgentSim>());
@@ -971,31 +994,36 @@ export default function WorldScene({
       gl={{ antialias: true, powerPreference: "high-performance" }}
     >
       <SceneSetup />
-      <color attach="background" args={["#03070c"]} />
-      <fog attach="fog" args={["#03070c", 55, 150]} />
+      <color attach="background" args={["#0a1520"]} />
+      <fog attach="fog" args={["#0c1a28", 70, 165]} />
 
-      <ambientLight intensity={0.5} color="#8fd8ff" />
-      <directionalLight position={[30, 42, 18]} intensity={1.4} color="#cfeaff" />
-      <hemisphereLight args={["#1d4260", "#0a1018", 0.9]} />
+      <ambientLight intensity={0.78} color="#d7ecff" />
+      <directionalLight position={[30, 42, 18]} intensity={1.75} color="#fff6e8" />
+      <hemisphereLight args={["#7eb8e8", "#1a3344", 1.15]} />
+      <pointLight position={[0, 18, 0]} color="#9fe8ff" intensity={22} distance={90} />
 
-      <Stars radius={140} depth={40} count={1800} factor={3.4} saturation={0} fade speed={0.6} />
+      <Stars radius={140} depth={40} count={1400} factor={2.8} saturation={0} fade speed={0.45} />
 
-      {/* ground */}
+      {/* ground — lighter plaza floor for readability */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]}>
         <circleGeometry args={[85, 64]} />
-        <meshStandardMaterial color="#04090f" roughness={1} />
+        <meshStandardMaterial color="#1a2f3f" roughness={0.92} metalness={0.08} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]}>
+        <circleGeometry args={[22, 48]} />
+        <meshStandardMaterial color="#243d52" roughness={0.85} metalness={0.12} />
       </mesh>
       <Grid
-        position={[0, 0.01, 0]}
+        position={[0, 0.012, 0]}
         args={[170, 170]}
         cellSize={3.5}
-        cellThickness={0.4}
-        cellColor="#0d2b33"
+        cellThickness={0.45}
+        cellColor="#3a6a7a"
         sectionSize={17.5}
-        sectionThickness={0.8}
-        sectionColor="#134d47"
-        fadeDistance={110}
-        fadeStrength={2}
+        sectionThickness={0.95}
+        sectionColor="#4ec4b0"
+        fadeDistance={120}
+        fadeStrength={1.6}
         infiniteGrid={false}
       />
 
@@ -1022,8 +1050,17 @@ export default function WorldScene({
         selection={selection}
         onSelect={onSelect}
         simMap={simMap.current}
+        excludeWallet={playerWallet}
       />
-      <Player player={player.current} touchDir={touchDir} onNearby={(key) => { setNearby(key); player.current.nearby = key; }} />
+      <Player
+        player={player.current}
+        touchDir={touchDir}
+        label={playerName || undefined}
+        onNearby={(key) => {
+          setNearby(key);
+          player.current.nearby = key;
+        }}
+      />
     </Canvas>
     <div className="world-controls pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-4 sm:p-6">
       <div className="pointer-events-auto max-w-sm rounded-2xl border border-cyan-300/20 bg-[#06111c]/80 p-3 text-xs text-slate-300 shadow-2xl backdrop-blur-xl">

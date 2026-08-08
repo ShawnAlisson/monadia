@@ -3,8 +3,10 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { useAccount } from "wagmi";
 import { useCivilization } from "@/hooks/useCivilization";
 import type { WorldSelection } from "@/components/world/WorldScene";
+import { AgentInteractPanel } from "@/components/AgentInteractPanel";
 
 const WorldScene = dynamic(() => import("@/components/world/WorldScene"), {
   ssr: false,
@@ -22,7 +24,15 @@ const WorldScene = dynamic(() => import("@/components/world/WorldScene"), {
 
 export default function WorldPage() {
   const { data, error } = useCivilization(2000);
+  const { address } = useAccount();
   const [selection, setSelection] = useState<WorldSelection>(null);
+
+  const me = useMemo(() => {
+    if (!data || !address) return null;
+    return (
+      data.citizens.find((c) => c.walletAddress.toLowerCase() === address.toLowerCase()) ?? null
+    );
+  }, [data, address]);
 
   const selected = useMemo(() => {
     if (!data || !selection) return null;
@@ -59,6 +69,8 @@ export default function WorldPage() {
           events={data.events}
           selection={selection}
           onSelect={setSelection}
+          playerWallet={address}
+          playerName={me?.name}
         />
       ) : (
         <div className="flex h-full items-center justify-center text-slate-400">
@@ -66,7 +78,6 @@ export default function WorldPage() {
         </div>
       )}
 
-      {/* compact gameplay HUD: only status and objective */}
       {data && (
         <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-2 text-xs sm:left-6 sm:top-5">
           <div className="rounded-full border border-cyan-300/20 bg-[#06111c]/80 px-3 py-2 text-cyan-100 shadow-xl backdrop-blur-xl">
@@ -78,7 +89,6 @@ export default function WorldPage() {
         </div>
       )}
 
-      {/* bottom-left: controls + legend */}
       <div className="pointer-events-none absolute bottom-4 left-4 hidden text-[11px] leading-5 text-slate-500 md:block">
         <p>WASD to move · click a person or building to inspect</p>
         <p>
@@ -87,16 +97,15 @@ export default function WorldPage() {
         </p>
       </div>
 
-      {/* one lightweight live signal */}
       {data && (
         <div className="pointer-events-none absolute bottom-5 left-1/2 hidden max-w-[min(80vw,430px)] -translate-x-1/2 rounded-full border border-cyan-400/10 bg-[#050b12]/75 px-4 py-2 text-center text-xs text-slate-300 backdrop-blur sm:block">
-          <span className="mr-2 text-cyan-300">LIVE</span>{data.events[0]?.message ?? "The city is online."}
+          <span className="mr-2 text-cyan-300">LIVE</span>
+          {data.events[0]?.message ?? "The city is online."}
         </div>
       )}
 
-      {/* right: selection panel */}
       {selected && (
-        <div className="absolute right-4 top-4 w-[min(88vw,330px)] animate-fade-in">
+        <div className="absolute right-4 top-4 max-h-[min(78vh,640px)] w-[min(88vw,330px)] overflow-y-auto animate-fade-in">
           <div className="panel glow-cyan !p-4">
             <button
               className="absolute right-3 top-2 text-slate-500 hover:text-white"
@@ -109,7 +118,8 @@ export default function WorldPage() {
             {selected.kind === "citizen" ? (
               <>
                 <p className="font-[family-name:var(--font-display)] text-lg tracking-wide text-cyan-100">
-                  {selected.citizen.type === "AI" ? "🏢 AI BUILDING" : "👤 HUMAN CITIZEN"} · {selected.citizen.name}
+                  {selected.citizen.type === "AI" ? "🏢 AI BUILDING" : "👤 HUMAN CITIZEN"} ·{" "}
+                  {selected.citizen.name}
                 </p>
                 <p className="text-xs text-slate-400">
                   {selected.citizen.occupation} · {selected.citizen.personality}
@@ -145,11 +155,19 @@ export default function WorldPage() {
                     {selected.citizen.lastReasoning}
                   </p>
                 )}
+                {selected.citizen.type === "AI" && (
+                  <AgentInteractPanel
+                    agentId={selected.citizen.id}
+                    agentName={selected.citizen.name}
+                  />
+                )}
                 <Link
                   href={`/citizens/${selected.citizen.id}`}
                   className="btn-ghost mt-3 w-full !py-2 text-sm"
                 >
-                  {selected.citizen.type === "AI" ? "Open agent terminal →" : "Open citizen profile →"}
+                  {selected.citizen.type === "AI"
+                    ? "Open agent terminal →"
+                    : "Open citizen profile →"}
                 </Link>
               </>
             ) : (
