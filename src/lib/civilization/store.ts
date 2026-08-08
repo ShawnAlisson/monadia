@@ -1,15 +1,19 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { ensureDatabase, getSql } from "@/lib/db";
 import { getAgentSeeds } from "@/lib/agents/seed";
+import { AGENT_DEPLOY } from "@/lib/agents/economy";
 import { getAgentAccount } from "@/lib/wallets";
 import { MDA } from "@/lib/token";
 import type {
   Business,
   Citizen,
   CivilizationEvent,
+  CustomAgentSkill,
   MarketState,
   Metrics,
   MoneyRequest,
+  Occupation,
+  Personality,
   Proposal,
   SocialMessage,
 } from "@/lib/types";
@@ -33,6 +37,10 @@ type CitizenRow = {
   coins: number | string;
   net_worth: number | string;
   employer_id: string | null;
+  creator_id: string | null;
+  skill_price: number | string | null;
+  skill_earnings: number | string | null;
+  skill_uses: number | string | null;
   wallet_index: number | string | null;
   map_x: number | string;
   map_y: number | string;
@@ -42,6 +50,7 @@ type CitizenRow = {
   last_reasoning: string | null;
   created_at: number | string;
   updated_at: number | string;
+  creator_name?: string | null;
 };
 
 type EventRow = {
@@ -81,6 +90,11 @@ function mapCitizen(row: CitizenRow): Citizen {
     coins: asNumber(row.coins),
     netWorth: asNumber(row.net_worth),
     employerId: row.employer_id,
+    creatorId: row.creator_id ?? null,
+    creatorName: row.creator_name ?? null,
+    skillPrice: asNumber(row.skill_price ?? 0),
+    skillEarnings: asNumber(row.skill_earnings ?? 0),
+    skillUses: asNumber(row.skill_uses ?? 0),
     mapX: asNumber(row.map_x),
     mapY: asNumber(row.map_y),
     worldX: row.world_x == null || row.world_x === "" ? null : asNumber(row.world_x),
@@ -310,15 +324,29 @@ export async function listCitizens(filter: "ALL" | "HUMAN" | "AI" = "ALL"): Prom
   await ensureDatabase();
   const sql = getSql();
   const rows = filter === "ALL"
-    ? await sql<CitizenRow[]>`SELECT * FROM citizens ORDER BY net_worth DESC`
-    : await sql<CitizenRow[]>`SELECT * FROM citizens WHERE type = ${filter} ORDER BY net_worth DESC`;
+    ? await sql<CitizenRow[]>`
+        SELECT c.*, owner.name AS creator_name
+        FROM citizens c
+        LEFT JOIN citizens owner ON owner.id = c.creator_id
+        ORDER BY c.net_worth DESC`
+    : await sql<CitizenRow[]>`
+        SELECT c.*, owner.name AS creator_name
+        FROM citizens c
+        LEFT JOIN citizens owner ON owner.id = c.creator_id
+        WHERE c.type = ${filter}
+        ORDER BY c.net_worth DESC`;
   return rows.map(mapCitizen);
 }
 
 export async function getCitizen(id: string): Promise<Citizen | null> {
   await ensureDatabase();
   const sql = getSql();
-  const [row] = await sql<CitizenRow[]>`SELECT * FROM citizens WHERE id = ${id} LIMIT 1`;
+  const [row] = await sql<CitizenRow[]>`
+    SELECT c.*, owner.name AS creator_name
+    FROM citizens c
+    LEFT JOIN citizens owner ON owner.id = c.creator_id
+    WHERE c.id = ${id}
+    LIMIT 1`;
   return row ? mapCitizen(row) : null;
 }
 
@@ -931,5 +959,224 @@ export async function resolveMoneyRequest(
     status: action === "pay" ? "paid" : action === "decline" ? "declined" : "cancelled",
     createdAt: asNumber(row.created_at),
     resolvedAt: timestamp,
+  };
+}
+
+function syntheticAgentWallet(creatorId: string, agentId: string): string {
+  const digest = createHash("sha256")
+    .update(`monadia-user-agent:${creatorId}:${agentId}`)
+    .digest("hex");
+  return `0x${digest.slice(0, 40)}`;
+}
+
+function slugSkillKey(name: string, index: number): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
+  return `${base || "skill"}-${index + 1}`;
+}
+
+export async function listAgentCustomSkills(agentId: string): Promise<CustomAgentSkill[]> {
+  await ensureDatabase();
+  const sql = getSql();
+  const rows = await sql<{
+    id: string;
+    skill_key: string;
+    name: string;
+    description: string;
+    prompt_hint: string;
+  }[]>`SELECT id, skill_key, name, description, prompt_hint FROM agent_skills
+    WHERE agent_id = ${agentId} ORDER BY created_at ASC`;
+  return (rows as Array<{
+    id: string;
+    skill_key: string;
+    name: string;
+    description: string;
+    prompt_hint: string;
+  }>).map((row) => ({
+    id: row.skill_key,
+    skillKey: row.skill_key,
+    name: row.name,
+    description: row.description,
+    promptHint: row.prompt_hint,
+  }));
+}
+
+export async function listOwnedAgents(walletAddress: string): Promise<Citizen[]> {
+  const owner = await getCitizenByWallet(walletAddress);
+  if (!owner) return [];
+  const all = await listCitizens("AI");
+  return all.filter((a) => a.creatorId === owner.id);
+}
+
+export type CreateCustomAgentInput = {
+  walletAddress: string;
+  name: string;
+  goal: string;
+  occupation: Occupation;
+  personality: Personality;
+  skillPrice?: number;
+  skills: Array<{ name: string; description: string; promptHint: string }>;
+};
+
+export async function createCustomAgent(input: CreateCustomAgentInput): Promise<Citizen> {
+  const owner = await getCitizenByWallet(input.walletAddress);
+  if (!owner || owner.type !== "HUMAN") throw new Error("Join as a human citizen first");
+
+  const name = input.name.trim().slice(0, 40);
+  const goal = input.goal.trim().slice(0, 160);
+  if (name.length < 3) throw new Error("Agent name must be at least 3 characters");
+  if (goal.length < 8) throw new Error("Describe what your agent helps with");
+
+  const skills = input.skills
+    .map((s) => ({
+      name: s.name.trim().slice(0, 40),
+      description: s.description.trim().slice(0, 160),
+      promptHint: s.promptHint.trim().slice(0, 220),
+    }))
+    .filter((s) => s.name && s.description && s.promptHint);
+  if (skills.length < 1) throw new Error("Add at least one skill");
+  if (skills.length > AGENT_DEPLOY.maxSkills) {
+    throw new Error(`At most ${AGENT_DEPLOY.maxSkills} skills per agent`);
+  }
+
+  const owned = await listOwnedAgents(input.walletAddress);
+  if (owned.length >= AGENT_DEPLOY.maxPerHuman) {
+    throw new Error(`You can deploy at most ${AGENT_DEPLOY.maxPerHuman} agents`);
+  }
+  if (owner.balance < AGENT_DEPLOY.createCost) {
+    throw new Error(`Deploying costs ${AGENT_DEPLOY.createCost} world MON`);
+  }
+
+  let skillPrice = input.skillPrice ?? AGENT_DEPLOY.defaultSkillPrice;
+  if (!Number.isFinite(skillPrice)) skillPrice = AGENT_DEPLOY.defaultSkillPrice;
+  skillPrice = Math.round(skillPrice * 1000) / 1000;
+  if (skillPrice < AGENT_DEPLOY.minSkillPrice || skillPrice > AGENT_DEPLOY.maxSkillPrice) {
+    throw new Error(
+      `Skill price must be between ${AGENT_DEPLOY.minSkillPrice} and ${AGENT_DEPLOY.maxSkillPrice} MON`,
+    );
+  }
+
+  const market = await getMarket();
+  const id = `user-ai-${randomUUID()}`;
+  const wallet = syntheticAgentWallet(owner.id, id);
+  const timestamp = now();
+  const balance = 2;
+  const food = 1;
+  const iron = 1;
+  const energy = 1;
+  const coins = 0;
+  const netWorth = computeNetWorth(balance, food, iron, energy, market);
+  const mapX = 1 + ((owned.length * 3) % 8);
+  const mapY = 1 + Math.floor(owned.length / 2);
+
+  await updateCitizenState(owner.id, { balance: owner.balance - AGENT_DEPLOY.createCost });
+  await bumpMetrics({
+    isAI: false,
+    economic: true,
+    treasuryDelta: AGENT_DEPLOY.createCost * 0.2,
+  });
+
+  const sql = getSql();
+  await sql`INSERT INTO citizens (
+    id, name, wallet_address, type, balance, personality, goal, occupation,
+    food, iron, energy, reputation, coins, net_worth, creator_id, skill_price,
+    skill_earnings, skill_uses, map_x, map_y, last_reasoning, created_at, updated_at
+  ) VALUES (
+    ${id}, ${name}, ${wallet}, 'AI', ${balance}, ${input.personality}, ${goal}, ${input.occupation},
+    ${food}, ${iron}, ${energy}, 55, ${coins}, ${netWorth}, ${owner.id}, ${skillPrice},
+    0, 0, ${mapX}, ${mapY}, ${`${name} opened by ${owner.name}. Ready for visitors.`},
+    ${timestamp}, ${timestamp}
+  )`;
+
+  for (let i = 0; i < skills.length; i++) {
+    const skill = skills[i];
+    await sql`INSERT INTO agent_skills (id, agent_id, skill_key, name, description, prompt_hint, created_at)
+      VALUES (
+        ${randomUUID()}, ${id}, ${slugSkillKey(skill.name, i)}, ${skill.name},
+        ${skill.description}, ${skill.promptHint}, ${timestamp}
+      )`;
+  }
+
+  await addEvent({
+    kind: "AGENT_DEPLOY",
+    actorName: owner.name,
+    actorType: "HUMAN",
+    message: `${owner.name} deployed ${name} (${skillPrice} MON/skill) — earn when citizens visit`,
+    meta: { agentId: id, skillPrice, skills: skills.map((s) => s.name) },
+  });
+
+  const agent = await getCitizen(id);
+  if (!agent) throw new Error("Agent deployed but could not be reloaded");
+  return agent;
+}
+
+export async function chargeAgentSkillUse(params: {
+  agentId: string;
+  payerWallet?: string;
+}): Promise<{
+  charged: number;
+  creatorPaid: number;
+  cityTax: number;
+  free: boolean;
+  payerId?: string;
+}> {
+  const agent = await getCitizen(params.agentId);
+  if (!agent || agent.type !== "AI") throw new Error("AI agent not found");
+
+  // System / free agents, or owner using their own agent.
+  if (!agent.creatorId || agent.skillPrice <= 0) {
+    return { charged: 0, creatorPaid: 0, cityTax: 0, free: true };
+  }
+
+  if (!params.payerWallet) {
+    throw new Error("Connect your wallet — this agent charges for skill use");
+  }
+  const payer = await getCitizenByWallet(params.payerWallet);
+  if (!payer || payer.type !== "HUMAN") {
+    throw new Error("Join as a human citizen before using paid skills");
+  }
+  if (payer.id === agent.creatorId) {
+    return { charged: 0, creatorPaid: 0, cityTax: 0, free: true, payerId: payer.id };
+  }
+  if (payer.balance < agent.skillPrice) {
+    throw new Error(`Need ${agent.skillPrice} world MON to use this skill`);
+  }
+
+  const price = agent.skillPrice;
+  const cityTax = Math.round(price * AGENT_DEPLOY.cityTaxShare * 1000) / 1000;
+  const creatorPaid = Math.round((price - cityTax) * 1000) / 1000;
+  const creator = await getCitizen(agent.creatorId);
+  if (!creator) throw new Error("Agent owner is missing");
+
+  await updateCitizenState(payer.id, { balance: payer.balance - price });
+  await updateCitizenState(creator.id, { balance: creator.balance + creatorPaid });
+  const sql = getSql();
+  await sql`UPDATE citizens SET
+    skill_earnings = skill_earnings + ${creatorPaid},
+    skill_uses = skill_uses + 1,
+    updated_at = ${now()}
+    WHERE id = ${agent.id}`;
+  if (cityTax > 0) {
+    await bumpMetrics({ isAI: false, economic: true, treasuryDelta: cityTax });
+  } else {
+    await bumpMetrics({ isAI: false, economic: true });
+  }
+  await addEvent({
+    kind: "SKILL_EARN",
+    actorName: payer.name,
+    actorType: "HUMAN",
+    message: `${payer.name} paid ${price.toFixed(3)} MON to use ${agent.name} · ${creator.name} earned ${creatorPaid.toFixed(3)} MON`,
+    meta: { agentId: agent.id, price, creatorPaid, cityTax },
+  });
+
+  return {
+    charged: price,
+    creatorPaid,
+    cityTax,
+    free: false,
+    payerId: payer.id,
   };
 }

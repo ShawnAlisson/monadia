@@ -4,6 +4,14 @@ import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import type { AgentSkill } from "@/lib/agents/skills";
 
+type AgentMeta = {
+  skillPrice: number;
+  skillEarnings: number;
+  skillUses: number;
+  creatorName?: string | null;
+  playerOwned: boolean;
+};
+
 export function AgentInteractPanel({
   agentId,
   agentName,
@@ -13,10 +21,12 @@ export function AgentInteractPanel({
 }) {
   const { address } = useAccount();
   const [skills, setSkills] = useState<AgentSkill[]>([]);
+  const [meta, setMeta] = useState<AgentMeta | null>(null);
   const [skillId, setSkillId] = useState<string>("");
   const [message, setMessage] = useState("");
   const [reply, setReply] = useState<string | null>(null);
   const [llm, setLlm] = useState<"openai" | "local-fallback" | null>(null);
+  const [paymentNote, setPaymentNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +40,13 @@ export function AgentInteractPanel({
         setSkills(list);
         setSkillId(list[0]?.id ?? "");
         setLlm(d.llm === "openai" ? "openai" : "local-fallback");
+        setMeta({
+          skillPrice: Number(d.agent?.skillPrice ?? 0),
+          skillEarnings: Number(d.agent?.skillEarnings ?? 0),
+          skillUses: Number(d.agent?.skillUses ?? 0),
+          creatorName: d.agent?.creatorName ?? null,
+          playerOwned: Boolean(d.agent?.playerOwned),
+        });
       })
       .catch(() => undefined);
     return () => {
@@ -42,6 +59,7 @@ export function AgentInteractPanel({
     setBusy(true);
     setError(null);
     setReply(null);
+    setPaymentNote(null);
     try {
       const res = await fetch(`/api/agents/${agentId}/interact`, {
         method: "POST",
@@ -56,10 +74,25 @@ export function AgentInteractPanel({
         reply?: string;
         error?: string;
         llm?: "openai" | "local-fallback";
+        payment?: { charged: number; creatorPaid: number; free: boolean };
       };
       if (!res.ok) throw new Error(body.error || "Agent did not respond");
       setReply(body.reply || "");
       if (body.llm) setLlm(body.llm);
+      if (body.payment && !body.payment.free && body.payment.charged > 0) {
+        setPaymentNote(
+          `Paid ${body.payment.charged} MON · owner earned ${body.payment.creatorPaid} MON`,
+        );
+        setMeta((prev) =>
+          prev
+            ? {
+                ...prev,
+                skillEarnings: prev.skillEarnings + body.payment!.creatorPaid,
+                skillUses: prev.skillUses + 1,
+              }
+            : prev,
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not reach agent");
     } finally {
@@ -71,9 +104,17 @@ export function AgentInteractPanel({
     return <p className="mt-3 text-xs text-slate-500">Loading agent skills…</p>;
   }
 
+  const price = meta?.skillPrice ?? 0;
+
   return (
     <div className="mt-3 space-y-2">
       <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300/80">Talk to {agentName}</p>
+      {meta?.playerOwned && (
+        <p className="text-[11px] text-amber-200/80">
+          Player agent{meta.creatorName ? ` by ${meta.creatorName}` : ""} · {price} MON/skill · earned{" "}
+          {meta.skillEarnings.toFixed(2)} MON ({meta.skillUses} uses)
+        </p>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {skills.map((s) => (
           <button
@@ -105,13 +146,18 @@ export function AgentInteractPanel({
         disabled={busy || !message.trim()}
         onClick={() => void ask()}
       >
-        {busy ? "Thinking…" : "Use skill"}
+        {busy
+          ? "Thinking…"
+          : price > 0
+            ? `Use skill · ${price} MON`
+            : "Use skill"}
       </button>
       {llm && (
         <p className="text-[10px] uppercase tracking-wider text-slate-600">
           {llm === "openai" ? "Powered by gpt-5.4-nano" : "Local fallback · set OPENAI_API_KEY for live AI"}
         </p>
       )}
+      {paymentNote && <p className="text-xs text-amber-200">{paymentNote}</p>}
       {reply && (
         <p className="rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-2 text-xs leading-5 text-slate-200">
           {reply}

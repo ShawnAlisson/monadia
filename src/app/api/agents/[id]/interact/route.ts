@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { ensureSeeded, getCitizen, listCitizens } from "@/lib/civilization/store";
-import { getAgentSkill, getAgentSkills } from "@/lib/agents/skills";
+import {
+  chargeAgentSkillUse,
+  ensureSeeded,
+  getCitizen,
+  listAgentCustomSkills,
+  listCitizens,
+} from "@/lib/civilization/store";
+import { getAgentSkill, getAgentSkills, type AgentSkill } from "@/lib/agents/skills";
 import { openaiConfigured, runAgentSkill } from "@/lib/agents/llm";
 import { startSimulationLoop } from "@/lib/sim/loop";
 
@@ -16,6 +22,21 @@ const bodySchema = z.object({
     .optional(),
 });
 
+async function resolveSkills(agentId: string, occupation: Parameters<typeof getAgentSkills>[0]) {
+  const custom = await listAgentCustomSkills(agentId);
+  if (custom.length) {
+    return custom.map(
+      (s): AgentSkill => ({
+        id: s.skillKey,
+        name: s.name,
+        description: s.description,
+        promptHint: s.promptHint,
+      }),
+    );
+  }
+  return getAgentSkills(occupation);
+}
+
 export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) {
   await startSimulationLoop();
   await ensureSeeded();
@@ -24,6 +45,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
   if (!citizen || citizen.type !== "AI") {
     return NextResponse.json({ error: "AI agent not found" }, { status: 404 });
   }
+  const skills = await resolveSkills(citizen.id, citizen.occupation);
   return NextResponse.json({
     agent: {
       id: citizen.id,
@@ -31,8 +53,14 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
       occupation: citizen.occupation,
       personality: citizen.personality,
       goal: citizen.goal,
+      creatorId: citizen.creatorId,
+      creatorName: citizen.creatorName,
+      skillPrice: citizen.skillPrice,
+      skillEarnings: citizen.skillEarnings,
+      skillUses: citizen.skillUses,
+      playerOwned: Boolean(citizen.creatorId),
     },
-    skills: getAgentSkills(citizen.occupation),
+    skills,
     llm: openaiConfigured() ? "openai" : "local-fallback",
   });
 }
@@ -51,9 +79,25 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  const skill = getAgentSkill(citizen.occupation, parsed.data.skillId);
+  const skills = await resolveSkills(citizen.id, citizen.occupation);
+  const skill =
+    skills.find((s) => s.id === parsed.data.skillId) ||
+    getAgentSkill(citizen.occupation, parsed.data.skillId);
   if (!skill) {
     return NextResponse.json({ error: "Unknown skill for this agent" }, { status: 400 });
+  }
+
+  let payment: Awaited<ReturnType<typeof chargeAgentSkillUse>>;
+  try {
+    payment = await chargeAgentSkillUse({
+      agentId: citizen.id,
+      payerWallet: parsed.data.walletAddress,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Could not charge for skill" },
+      { status: 402 },
+    );
   }
 
   let requesterName: string | undefined;
@@ -77,5 +121,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     llm: openaiConfigured() ? "openai" : "local-fallback",
     agentId: citizen.id,
     agentName: citizen.name,
+    payment,
   });
 }

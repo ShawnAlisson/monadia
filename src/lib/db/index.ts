@@ -166,6 +166,23 @@ export async function ensureDatabase() {
         resolved_at BIGINT
       )`;
       await sql`CREATE INDEX IF NOT EXISTS money_requests_to_status_idx ON money_requests (to_id, status, created_at DESC)`;
+      // Player-deployed AI agents with custom skills that earn world MON.
+      await sql`ALTER TABLE citizens ADD COLUMN IF NOT EXISTS creator_id TEXT`;
+      await sql`ALTER TABLE citizens ADD COLUMN IF NOT EXISTS skill_price DOUBLE PRECISION NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE citizens ADD COLUMN IF NOT EXISTS skill_earnings DOUBLE PRECISION NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE citizens ADD COLUMN IF NOT EXISTS skill_uses INTEGER NOT NULL DEFAULT 0`;
+      await sql`CREATE INDEX IF NOT EXISTS citizens_creator_idx ON citizens (creator_id) WHERE creator_id IS NOT NULL`;
+      await sql`CREATE TABLE IF NOT EXISTS agent_skills (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        skill_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        prompt_hint TEXT NOT NULL,
+        created_at BIGINT NOT NULL,
+        UNIQUE (agent_id, skill_key)
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS agent_skills_agent_idx ON agent_skills (agent_id)`;
     })().catch((error) => {
       // A transient Neon/network failure must not poison a warm Vercel
       // function forever; the next request can safely retry initialization.

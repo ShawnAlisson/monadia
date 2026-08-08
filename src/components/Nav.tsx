@@ -7,6 +7,7 @@ import { ConnectWallet } from "@/components/ConnectWallet";
 const links = [
   { href: "/world", label: "World" },
   { href: "/market", label: "Market" },
+  { href: "/citizens", label: "Agents" },
   { href: "/governance", label: "Vote" },
 ];
 

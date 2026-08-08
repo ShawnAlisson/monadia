@@ -94,11 +94,21 @@ export default function CitizenProfilePage() {
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
       <div className="panel glow-cyan">
         <p className="text-xs uppercase tracking-[0.25em] text-cyan-300">
-          {citizen.type === "AI" ? "🤖 AI Citizen" : "👤 Human Citizen"}
+          {citizen.type === "AI"
+            ? citizen.creatorId
+              ? "🏢 Player Agent"
+              : "🏢 AI Service"
+            : "👤 Human Citizen"}
         </p>
         <h1 className="mt-2 font-[family-name:var(--font-display)] text-5xl tracking-wide text-cyan-50">
           {citizen.name}
         </h1>
+        {citizen.creatorName && (
+          <p className="mt-2 text-sm text-amber-200">
+            Deployed by {citizen.creatorName} · {citizen.skillPrice} MON per skill use · earned{" "}
+            {citizen.skillEarnings.toFixed(2)} MON ({citizen.skillUses} uses)
+          </p>
+        )}
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           <div>
             <p className="text-xs uppercase text-slate-500">Occupation</p>

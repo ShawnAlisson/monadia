@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useCivilization } from "@/hooks/useCivilization";
 import type { Citizen } from "@/lib/types";
+import { CreateAgentPanel } from "@/components/CreateAgentPanel";
 
-type SortKey = "wealth" | "reputation" | "activity";
+type SortKey = "wealth" | "reputation" | "activity" | "earnings";
 
 export default function CitizensPage() {
-  const { data } = useCivilization(3000);
+  const { data, refresh } = useCivilization(3000);
   const [tab, setTab] = useState<"ALL" | "HUMAN" | "AI">("ALL");
   const [sort, setSort] = useState<SortKey>("wealth");
 
@@ -18,6 +19,9 @@ export default function CitizensPage() {
     if (sort === "wealth") list = [...list].sort((a, b) => b.netWorth - a.netWorth);
     if (sort === "reputation") list = [...list].sort((a, b) => b.reputation - a.reputation);
     if (sort === "activity") list = [...list].sort((a, b) => b.updatedAt - a.updatedAt);
+    if (sort === "earnings") {
+      list = [...list].sort((a, b) => b.skillEarnings - a.skillEarnings);
+    }
     return list;
   }, [data, tab, sort]);
 
@@ -27,8 +31,12 @@ export default function CitizensPage() {
         <h1 className="font-[family-name:var(--font-display)] text-4xl tracking-[0.12em] text-cyan-100">
           CITIZENS
         </h1>
-        <p className="mt-1 text-slate-400">Humans and AI agents in the same economy.</p>
+        <p className="mt-1 text-slate-400">
+          Humans, city AI services, and player-owned agents that earn from skill use.
+        </p>
       </div>
+
+      <CreateAgentPanel onCreated={() => void refresh()} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
@@ -55,6 +63,7 @@ export default function CitizensPage() {
           <option value="wealth">Sort: Wealth</option>
           <option value="reputation">Sort: Reputation</option>
           <option value="activity">Sort: Activity</option>
+          <option value="earnings">Sort: Skill earnings</option>
         </select>
       </div>
 
@@ -64,14 +73,14 @@ export default function CitizensPage() {
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-lg text-cyan-50">
-                  {c.type === "AI" ? "🤖" : "👤"} {c.name}
+                  {c.type === "AI" ? "🏢" : "👤"} {c.name}
                 </p>
                 <p className="text-sm text-slate-400">
                   {c.occupation} · {c.personality}
                 </p>
               </div>
               <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">
-                {c.type}
+                {c.creatorId ? "PLAYER AI" : c.type}
               </span>
             </div>
             <div className="mt-4 space-y-1 text-sm">
@@ -79,6 +88,14 @@ export default function CitizensPage() {
               <p>🪙 {c.coins.toFixed(1)} MDA</p>
               <p>📈 Net Worth: {c.netWorth.toFixed(2)} MON</p>
               <p>⭐ Reputation: {c.reputation}</p>
+              {c.type === "AI" && c.creatorId && (
+                <p className="text-amber-200">
+                  ◎ {c.skillPrice} MON/use · earned {c.skillEarnings.toFixed(2)} MON
+                </p>
+              )}
+              {c.creatorName && (
+                <p className="text-xs text-slate-500">Owner: {c.creatorName}</p>
+              )}
             </div>
             <p className="mt-3 text-xs text-slate-500">Goal: {c.goal}</p>
             <Link href={`/citizens/${c.id}`} className="btn-ghost mt-4 w-full text-sm">

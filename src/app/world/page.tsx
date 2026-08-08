@@ -151,6 +151,12 @@ export default function WorldPage() {
                     {selected.citizen.inventory.energy}
                   </span>
                 </div>
+                {selected.citizen.type === "AI" && selected.citizen.creatorName && (
+                  <p className="mt-1 text-[11px] text-amber-200/80">
+                    Player agent by {selected.citizen.creatorName} · {selected.citizen.skillPrice}{" "}
+                    MON/skill · earned {selected.citizen.skillEarnings.toFixed(2)} MON
+                  </p>
+                )}
                 {selected.citizen.lastReasoning && (
                   <p className="mt-3 rounded-lg bg-white/[0.04] p-2 text-xs text-slate-300">
                     {selected.citizen.lastReasoning}

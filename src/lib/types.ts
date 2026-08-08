@@ -56,6 +56,14 @@ export type Citizen = {
   coins: number;
   netWorth: number;
   employerId?: string | null;
+  /** Human citizen who deployed this AI agent (player-owned agents only). */
+  creatorId?: string | null;
+  creatorName?: string | null;
+  /** World MON charged per skill use; paid to the creator. */
+  skillPrice: number;
+  /** Lifetime world MON earned from skill uses. */
+  skillEarnings: number;
+  skillUses: number;
   mapX: number;
   mapY: number;
   /** Live/last world coordinates in the 3D city (not the 1..8 map grid). */
@@ -68,6 +76,14 @@ export type Citizen = {
   lastReasoning?: string | null;
   createdAt: number;
   updatedAt: number;
+};
+
+export type CustomAgentSkill = {
+  id: string;
+  skillKey: string;
+  name: string;
+  description: string;
+  promptHint: string;
 };
 
 export type SocialMessage = {
