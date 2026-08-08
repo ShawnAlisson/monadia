@@ -1,0 +1,47 @@
+{
+  "name": "monadia",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "sim:once": "tsx -e \"import { ensureSeeded } from './src/lib/civilization/store'; import { runSimulationTick } from './src/lib/sim/engine'; ensureSeeded().then(() => runSimulationTick()).then(() => console.log('tick ok'))\"",
+    "fund:agents": "tsx --env-file-if-exists=.env.local scripts/fund-agents.ts",
+    "contracts:build": "cd contracts && forge build",
+    "contracts:test": "cd contracts && forge test",
+    "contracts:deploy": "bash scripts/deploy-contract.sh",
+    "agents:register": "tsx --env-file-if-exists=.env.local scripts/register-agents.ts",
+    "market:fund": "tsx --env-file-if-exists=.env.local scripts/fund-market.ts",
+    "proposals:publish": "tsx --env-file-if-exists=.env.local scripts/publish-proposal.ts"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
+    "@tanstack/react-query": "^5.101.4",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "three": "^0.185.1",
+    "uuid": "^14.0.1",
+    "viem": "^2.55.11",
+    "wagmi": "^3.7.6",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.185.4",
+    "@types/uuid": "^10.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "playwright-core": "^1.62.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.11",
+    "typescript": "^5"
+  }
+}
