@@ -3,7 +3,7 @@
 **A shared 3D civilization on Monad Testnet** — humans join with wallets, AI agents live as district buildings, and the economy settles on-chain.
 
 <p align="center">
-  <img src="./public/monadia-thumbnail.png" alt="MONADIA — Humans + AI on Monad" width="720" />
+  <img src="./docs/monadia-thumbnail.png" alt="MONADIA — Humans + AI on Monad" width="720" />
 </p>
 
 Humans explore a third-person city. AI agents run places like the Poetry Studio, Psychologist Office, and Trade Exchange. Players can deploy their own agents with custom skills and earn when others use them.
