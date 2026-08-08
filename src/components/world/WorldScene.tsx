@@ -17,7 +17,6 @@ import {
   businessPosition,
   bubbleText,
   eventColor,
-  eventTarget,
   fillerBuildings,
   homePosition,
   rand,
@@ -75,35 +74,36 @@ function Avatar({
   const [hovered, setHovered] = useState(false);
   const colors = CITIZEN_COLORS[citizen.type];
   const phase = useMemo(() => rand(citizen.id, 99) * Math.PI * 2, [citizen.id]);
+  const online = citizen.online;
 
   useFrame(({ clock }, dt) => {
     const g = group.current;
     if (!g) return;
-    // steer toward target
+    // Ease toward the last reported / live server position — no autonomous wandering.
     const dx = sim.target.x - sim.pos.x;
     const dz = sim.target.z - sim.pos.z;
     const dist = Math.hypot(dx, dz);
-    if (dist > 0.15) {
-      const step = Math.min(dist, sim.speed * dt);
+    if (dist > 0.05) {
+      const step = Math.min(dist, (online ? sim.speed : sim.speed * 0.35) * dt);
       sim.pos.x += (dx / dist) * step;
       sim.pos.z += (dz / dist) * step;
       g.rotation.y = THREE.MathUtils.lerp(
         g.rotation.y,
         Math.atan2(dx, dz),
-        Math.min(1, dt * 6)
+        Math.min(1, dt * 6),
       );
     }
     const t = clock.elapsedTime;
-    g.position.set(sim.pos.x, 0.15 + Math.sin(t * 2.2 + phase) * 0.08, sim.pos.z);
+    const bob = online ? Math.sin(t * 2.2 + phase) * 0.08 : 0;
+    g.position.set(sim.pos.x, 0.15 + bob, sim.pos.z);
 
-    // event pulse ring
     if (ringRef.current && bubble) {
       const age = (performance.now() - bubble.start) / 1000;
       const s = 0.6 + (age % 1.4) * 1.6;
       ringRef.current.scale.setScalar(s);
       (ringRef.current.material as THREE.MeshBasicMaterial).opacity = Math.max(
         0,
-        0.55 - (age % 1.4) * 0.4
+        0.55 - (age % 1.4) * 0.4,
       );
     }
   });
@@ -115,7 +115,7 @@ function Avatar({
     };
   }, [hovered]);
 
-  const showTag = hovered || selected || !!bubble;
+  const showTag = hovered || selected || !!bubble || !online;
 
   return (
     <group
@@ -130,43 +130,48 @@ function Avatar({
       }}
       onPointerOut={() => setHovered(false)}
     >
-      {/* body */}
       <mesh position={[0, 0.55, 0]} castShadow={false}>
         <capsuleGeometry args={[0.28, 0.55, 4, 10]} />
         <meshStandardMaterial
           color={colors.body}
           emissive={colors.glow}
-          emissiveIntensity={hovered || selected ? 0.85 : 0.35}
-          roughness={0.4}
+          emissiveIntensity={
+            online
+              ? hovered || selected
+                ? 0.85
+                : 0.35
+              : hovered || selected
+                ? 0.35
+                : 0.08
+          }
+          roughness={online ? 0.4 : 0.75}
+          transparent={!online}
+          opacity={online ? 1 : 0.72}
         />
       </mesh>
-      {/* head / visor */}
       <mesh position={[0, 1.18, 0]}>
         <sphereGeometry args={[0.2, 12, 10]} />
         <meshStandardMaterial
           color="#0a1520"
           emissive={colors.glow}
-          emissiveIntensity={citizen.type === "AI" ? 1.4 : 0.6}
+          emissiveIntensity={online ? 0.6 : 0.15}
           roughness={0.25}
         />
       </mesh>
-      {/* base ring */}
       <mesh position={[0, -0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.35, 0.5, 24]} />
         <meshBasicMaterial
-          color={selected ? "#ffffff" : colors.glow}
+          color={selected ? "#ffffff" : online ? colors.glow : "#64748b"}
           transparent
-          opacity={selected ? 0.9 : 0.35}
+          opacity={selected ? 0.9 : online ? 0.35 : 0.2}
         />
       </mesh>
-      {/* event pulse */}
       {bubble && (
         <mesh ref={ringRef} position={[0, -0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry args={[0.55, 0.68, 28]} />
           <meshBasicMaterial color={bubble.color} transparent opacity={0.5} />
         </mesh>
       )}
-      {/* name tag + bubble */}
       {showTag && (
         <>
           {bubble && (
@@ -178,8 +183,8 @@ function Avatar({
             />
           )}
           <TextSprite
-            text={`${citizen.type === "AI" ? "🤖" : "👤"} ${citizen.name}`}
-            color={citizen.type === "AI" ? "#9dfce8" : "#ffd9a0"}
+            text={`${online ? "●" : "○"} ${citizen.name}`}
+            color={online ? "#ffd9a0" : "#94a3b8"}
             height={0.6}
             position={[0, 2, 0]}
           />
@@ -218,73 +223,44 @@ function Citizens({
       excludeWallet && c.walletAddress.toLowerCase() === excludeWallet.toLowerCase(),
     );
 
-  // ensure sim state exists for every other human citizen
+  const resolvedPos = (c: Citizen) => {
+    if (c.worldX != null && c.worldZ != null) return { x: c.worldX, z: c.worldZ };
+    return homePosition(c);
+  };
+
+  // Keep other humans pinned to their last/live server position (no NPC wandering).
   for (const c of citizens) {
     if (c.type === "AI" || isSelf(c)) continue;
-    if (!simMap.has(c.id)) {
-      const home = homePosition(c);
+    const spot = resolvedPos(c);
+    const existing = simMap.get(c.id);
+    if (!existing) {
       simMap.set(c.id, {
-        pos: new THREE.Vector3(home.x, 0, home.z),
-        target: new THREE.Vector3(home.x, 0, home.z),
-        nextThink: 0,
-        speed: 2.2 + rand(c.id, 5) * 1.6,
+        pos: new THREE.Vector3(spot.x, 0, spot.z),
+        target: new THREE.Vector3(spot.x, 0, spot.z),
+        nextThink: Number.POSITIVE_INFINITY,
+        speed: c.online ? 4.2 : 2.4,
       });
+    } else {
+      existing.target.set(spot.x, 0, spot.z);
+      existing.speed = c.online ? 4.2 : 2.4;
+      // Snap if they just appeared far away (teleport / first load).
+      if (existing.pos.distanceTo(existing.target) > 28) {
+        existing.pos.copy(existing.target);
+      }
     }
   }
 
-  // Visible human citizens wander through the world; AI agents are buildings.
-  useFrame(() => {
-    const now = performance.now();
-    for (const c of citizens) {
-      if (c.type === "AI" || isSelf(c)) continue;
-      const sim = simMap.get(c.id);
-      if (!sim || now < sim.nextThink) continue;
-      sim.nextThink = now + 4000 + rand(c.id, Math.floor(now / 1000)) * 9000;
-      const roll = Math.random();
-      if (roll < 0.45) {
-        // wander near home
-        const home = homePosition(c);
-        sim.target.set(
-          home.x + (Math.random() - 0.5) * 8,
-          0,
-          home.z + (Math.random() - 0.5) * 8
-        );
-      } else if (roll < 0.75) {
-        // visit a POI
-        const keys = Object.keys(POI) as PoiKey[];
-        const poi = POI[keys[Math.floor(Math.random() * keys.length)]];
-        sim.target.set(
-          poi.x + (Math.random() - 0.5) * 6,
-          0,
-          poi.z + (Math.random() - 0.5) * 6
-        );
-      }
-      // else: stay put
-    }
-  });
-
-  // react to new civilization events
+  // React to new civilization events (speech bubbles only — no forced wander).
   useEffect(() => {
     const byName = new Map(citizens.map((c) => [c.name, c]));
     const fresh: Record<string, Bubble> = {};
     for (const e of events) {
       if (seenEvents.current.has(e.id)) continue;
       seenEvents.current.add(e.id);
-      if (firstLoad.current) continue; // don't replay history on first snapshot
+      if (firstLoad.current) continue;
       const actor = byName.get(e.actorName);
-      if (!actor) continue;
-      const sim = simMap.get(actor.id);
-      if (!sim) continue;
-      const poiKey = eventTarget(e.kind);
-      if (poiKey) {
-        const poi = POI[poiKey];
-        sim.target.set(
-          poi.x + (Math.random() - 0.5) * 5,
-          0,
-          poi.z + (Math.random() - 0.5) * 5
-        );
-        sim.nextThink = performance.now() + 9000;
-      }
+      if (!actor || actor.type === "AI" || isSelf(actor)) continue;
+      if (!simMap.get(actor.id)) continue;
       fresh[actor.id] = {
         text: bubbleText(e),
         color: eventColor(e.kind),
@@ -306,7 +282,7 @@ function Citizens({
       }, 6000);
       return () => clearTimeout(timer);
     }
-  }, [events, citizens, simMap]);
+  }, [events, citizens, simMap, excludeWallet]);
 
   return (
     <>
@@ -784,31 +760,57 @@ function Player({
   onNearby,
   touchDir,
   label,
+  walletAddress,
+  initialPos,
 }: {
   player: PlayerState;
   onNearby: (poi: PoiKey | null) => void;
   touchDir: React.RefObject<{ x: number; z: number }>;
   label?: string;
+  walletAddress?: string | null;
+  initialPos?: { x: number; z: number } | null;
 }) {
   const group = useRef<THREE.Group>(null);
   const visor = useRef<THREE.Mesh>(null);
   const { camera } = useThree();
   const keys = useRef(new Set<string>());
   const lastNearby = useRef<PoiKey | null>(null);
+  const lastHeartbeat = useRef(0);
+  const seeded = useRef(false);
+
+  useEffect(() => {
+    if (seeded.current || !initialPos) return;
+    player.pos.set(initialPos.x, 0, initialPos.z);
+    seeded.current = true;
+  }, [initialPos, player]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => keys.current.add(e.key.toLowerCase());
     const up = (e: KeyboardEvent) => keys.current.delete(e.key.toLowerCase());
-    const clear = () => { keys.current.clear(); touchDir.current.x = 0; touchDir.current.z = 0; };
+    const clear = () => {
+      keys.current.clear();
+      touchDir.current.x = 0;
+      touchDir.current.z = 0;
+    };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", clear);
-    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", clear); };
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", clear);
+    };
   }, [touchDir]);
 
   useFrame(({ clock }, dt) => {
-    const x = (keys.current.has("d") ? 1 : 0) - (keys.current.has("a") ? 1 : 0) + touchDir.current.x;
-    const z = (keys.current.has("s") ? 1 : 0) - (keys.current.has("w") ? 1 : 0) + touchDir.current.z;
+    const x =
+      (keys.current.has("d") ? 1 : 0) -
+      (keys.current.has("a") ? 1 : 0) +
+      touchDir.current.x;
+    const z =
+      (keys.current.has("s") ? 1 : 0) -
+      (keys.current.has("w") ? 1 : 0) +
+      touchDir.current.z;
     const length = Math.hypot(x, z);
     if (length > 0.05) {
       const speed = 7.2 * dt;
@@ -818,7 +820,11 @@ function Player({
     }
     const g = group.current;
     if (g) {
-      g.position.set(player.pos.x, 0.05 + Math.sin(clock.elapsedTime * 4) * 0.035, player.pos.z);
+      g.position.set(
+        player.pos.x,
+        0.05 + Math.sin(clock.elapsedTime * 4) * 0.035,
+        player.pos.z,
+      );
       g.rotation.y = THREE.MathUtils.lerp(g.rotation.y, player.yaw, dt * 9);
     }
     if (visor.current) {
@@ -834,18 +840,42 @@ function Player({
     (Object.keys(POI) as PoiKey[]).forEach((key) => {
       const p = POI[key];
       const d = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
-      if (d < distance) { distance = d; nearest = key; }
+      if (d < distance) {
+        distance = d;
+        nearest = key;
+      }
     });
     const next = distance < 7 ? nearest : null;
-    if (next !== lastNearby.current) { lastNearby.current = next; onNearby(next); }
+    if (next !== lastNearby.current) {
+      lastNearby.current = next;
+      onNearby(next);
+    }
+
+    // Publish live position so other clients can place you (and freeze you when you leave).
+    if (walletAddress && performance.now() - lastHeartbeat.current > 1500) {
+      lastHeartbeat.current = performance.now();
+      const xPos = player.pos.x;
+      const zPos = player.pos.z;
+      void fetch("/api/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress, x: xPos, z: zPos }),
+        keepalive: true,
+      }).catch(() => undefined);
+    }
   });
 
   return (
     <group ref={group}>
-      {/* A readable third-person explorer: suit, visor, backpack, and tool beacon. */}
       <mesh position={[0, 0.64, 0]} castShadow>
         <capsuleGeometry args={[0.36, 0.78, 5, 12]} />
-        <meshStandardMaterial color="#19354b" emissive="#16495a" emissiveIntensity={0.35} roughness={0.32} metalness={0.2} />
+        <meshStandardMaterial
+          color="#19354b"
+          emissive="#16495a"
+          emissiveIntensity={0.35}
+          roughness={0.32}
+          metalness={0.2}
+        />
       </mesh>
       <mesh position={[0, 1.42, 0]}>
         <sphereGeometry args={[0.29, 16, 12]} />
@@ -853,11 +883,23 @@ function Player({
       </mesh>
       <mesh ref={visor} position={[0, 1.44, 0.235]}>
         <sphereGeometry args={[0.205, 16, 10, 0, Math.PI]} />
-        <meshStandardMaterial color="#071e27" emissive="#7affdf" emissiveIntensity={1.2} roughness={0.12} metalness={0.25} />
+        <meshStandardMaterial
+          color="#071e27"
+          emissive="#7affdf"
+          emissiveIntensity={1.2}
+          roughness={0.12}
+          metalness={0.25}
+        />
       </mesh>
       <mesh position={[0, 0.82, -0.34]}>
         <boxGeometry args={[0.42, 0.54, 0.2]} />
-        <meshStandardMaterial color="#102636" emissive="#3de6c1" emissiveIntensity={0.28} roughness={0.4} metalness={0.4} />
+        <meshStandardMaterial
+          color="#102636"
+          emissive="#3de6c1"
+          emissiveIntensity={0.28}
+          roughness={0.4}
+          metalness={0.4}
+        />
       </mesh>
       {[-1, 1].map((side) => (
         <group key={side} position={[side * 0.43, 0.86, 0]} rotation={[0, 0, side * 0.2]}>
@@ -876,7 +918,12 @@ function Player({
         <meshBasicMaterial color="#60f5d2" transparent opacity={0.8} />
       </mesh>
       <pointLight position={[0, 1.4, 0]} color="#3de6c1" intensity={2.5} distance={5} />
-      <TextSprite text={label ? `YOU · ${label}` : "YOU"} color="#d4fff7" height={0.55} position={[0, 2.1, 0]} />
+      <TextSprite
+        text={label ? `YOU · ${label}` : "YOU"}
+        color="#d4fff7"
+        height={0.55}
+        position={[0, 2.1, 0]}
+      />
     </group>
   );
 }
@@ -1056,6 +1103,19 @@ export default function WorldScene({
         player={player.current}
         touchDir={touchDir}
         label={playerName || undefined}
+        walletAddress={playerWallet}
+        initialPos={
+          (() => {
+            if (!playerWallet) return null;
+            const me = citizens.find(
+              (c) => c.walletAddress.toLowerCase() === playerWallet.toLowerCase(),
+            );
+            if (me?.worldX != null && me?.worldZ != null) {
+              return { x: me.worldX, z: me.worldZ };
+            }
+            return me ? homePosition(me) : null;
+          })()
+        }
         onNearby={(key) => {
           setNearby(key);
           player.current.nearby = key;

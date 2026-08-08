@@ -657,8 +657,18 @@ export async function listConversation(
   // Mark inbound as read
   await sql`UPDATE social_messages SET read_at = ${now()}
     WHERE to_id = ${me.id} AND from_id = ${otherCitizenId} AND read_at IS NULL`;
-  return rows
-    .map((row) => ({
+  type MsgRow = {
+    id: string;
+    from_id: string;
+    to_id: string;
+    body: string;
+    created_at: number | string;
+    read_at: number | string | null;
+    from_name: string;
+    to_name: string;
+  };
+  return (rows as MsgRow[])
+    .map((row: MsgRow) => ({
       id: row.id,
       fromId: row.from_id,
       fromName: row.from_name,
@@ -692,7 +702,17 @@ export async function listInbox(walletAddress: string, limit = 30): Promise<Soci
     WHERE m.to_id = ${me.id} OR m.from_id = ${me.id}
     ORDER BY m.created_at DESC
     LIMIT ${limit}`;
-  return rows.map((row) => ({
+  type MsgRow = {
+    id: string;
+    from_id: string;
+    to_id: string;
+    body: string;
+    created_at: number | string;
+    read_at: number | string | null;
+    from_name: string;
+    to_name: string;
+  };
+  return (rows as MsgRow[]).map((row: MsgRow) => ({
     id: row.id,
     fromId: row.from_id,
     fromName: row.from_name,
@@ -801,7 +821,19 @@ export async function listMoneyRequests(walletAddress: string): Promise<MoneyReq
     WHERE r.from_id = ${me.id} OR r.to_id = ${me.id}
     ORDER BY r.created_at DESC
     LIMIT 40`;
-  return rows.map((row) => ({
+  type ReqRow = {
+    id: string;
+    from_id: string;
+    to_id: string;
+    amount: number | string;
+    note: string;
+    status: MoneyRequest["status"];
+    created_at: number | string;
+    resolved_at: number | string | null;
+    from_name: string;
+    to_name: string;
+  };
+  return (rows as ReqRow[]).map((row: ReqRow) => ({
     id: row.id,
     fromId: row.from_id,
     fromName: row.from_name,

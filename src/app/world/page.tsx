@@ -7,6 +7,7 @@ import { useAccount } from "wagmi";
 import { useCivilization } from "@/hooks/useCivilization";
 import type { WorldSelection } from "@/components/world/WorldScene";
 import { AgentInteractPanel } from "@/components/AgentInteractPanel";
+import { HumanSocialPanel } from "@/components/HumanSocialPanel";
 
 const WorldScene = dynamic(() => import("@/components/world/WorldScene"), {
   ssr: false,
@@ -93,7 +94,8 @@ export default function WorldPage() {
         <p>WASD to move · click a person or building to inspect</p>
         <p>
           <span className="text-cyan-300">●</span> AI agent building ·{" "}
-          <span className="text-amber-300">●</span> Human citizen
+          <span className="text-amber-300">●</span> Human online ·{" "}
+          <span className="text-slate-400">○</span> Human offline (last place)
         </p>
       </div>
 
@@ -159,6 +161,13 @@ export default function WorldPage() {
                   <AgentInteractPanel
                     agentId={selected.citizen.id}
                     agentName={selected.citizen.name}
+                  />
+                )}
+                {selected.citizen.type === "HUMAN" && me && (
+                  <HumanSocialPanel
+                    peer={selected.citizen}
+                    meId={me.id}
+                    onDone={() => void undefined}
                   />
                 )}
                 <Link

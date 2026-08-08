@@ -8,9 +8,11 @@ type Tab = "talk" | "send" | "request";
 
 export function HumanSocialPanel({
   peer,
+  meId,
   onDone,
 }: {
   peer: Citizen;
+  meId: string;
   onDone?: () => void;
 }) {
   const { address, isConnected } = useAccount();
@@ -38,9 +40,7 @@ export function HumanSocialPanel({
       const body = (await reqRes.json()) as { requests: MoneyRequest[] };
       setRequests(
         (body.requests || []).filter(
-          (r) =>
-            (r.fromId === peer.id || r.toId === peer.id) &&
-            (r.status === "pending" || Date.now() - r.createdAt < 86_400_000),
+          (r) => r.fromId === peer.id || r.toId === peer.id,
         ),
       );
     }
@@ -173,10 +173,12 @@ export function HumanSocialPanel({
     return <p className="mt-3 text-xs text-slate-500">Connect your wallet to talk or send MON.</p>;
   }
 
+  const pending = requests.filter((r) => r.status === "pending");
+
   return (
     <div className="mt-3 space-y-2 border-t border-cyan-300/10 pt-3">
       <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300/80">
-        Citizen link · {peer.online ? "online" : "last known spot"}
+        Citizen link · {peer.online ? "online now" : "offline · last place"}
       </p>
       <div className="flex gap-1">
         {(["talk", "send", "request"] as Tab[]).map((t) => (
@@ -202,7 +204,7 @@ export function HumanSocialPanel({
               <p className="text-[11px] text-slate-500">No messages yet. Say hello.</p>
             )}
             {messages.map((m) => {
-              const mine = m.fromId !== peer.id;
+              const mine = m.fromId === meId;
               return (
                 <div
                   key={m.id}
@@ -297,58 +299,51 @@ export function HumanSocialPanel({
         </>
       )}
 
-      {requests.filter((r) => r.status === "pending").length > 0 && (
+      {pending.length > 0 && (
         <div className="space-y-1.5 rounded-lg border border-amber-300/15 bg-amber-400/5 p-2">
           <p className="text-[10px] uppercase tracking-wider text-amber-200/80">Open requests</p>
-          {requests
-            .filter((r) => r.status === "pending")
-            .map((r) => {
-              const iAmPayer = r.toId !== peer.id ? false : true;
-              // If peer requested from me: I'm the toId (payer). If I requested from peer: I'm fromId.
-              const amRecipient = r.toId !== peer.id && r.fromId === peer.id ? false : r.toId !== peer.id;
-              // Simpler: compare with my identity via messages - we don't have my id easily.
-              // Use: if r.toId === peer.id then I am requester (from). If r.fromId === peer.id then I am payer (to).
-              const iRequested = r.toId === peer.id;
-              const theyRequested = r.fromId === peer.id;
-              return (
-                <div key={r.id} className="text-xs text-slate-200">
-                  <p>
-                    {r.fromName} → {r.toName}: <span className="text-amber-100">{r.amount} MON</span>
-                    {r.note ? ` · ${r.note}` : ""}
-                  </p>
-                  <div className="mt-1 flex gap-1">
-                    {theyRequested && (
-                      <>
-                        <button
-                          className="btn-primary !px-2 !py-1 text-[11px]"
-                          disabled={busy}
-                          onClick={() => void resolveRequest(r.id, "pay")}
-                        >
-                          Pay
-                        </button>
-                        <button
-                          className="btn-ghost !px-2 !py-1 text-[11px]"
-                          disabled={busy}
-                          onClick={() => void resolveRequest(r.id, "decline")}
-                        >
-                          Decline
-                        </button>
-                      </>
-                    )}
-                    {iRequested && (
+          {pending.map((r) => {
+            const iAmPayer = r.toId === meId;
+            const iRequested = r.fromId === meId;
+            return (
+              <div key={r.id} className="text-xs text-slate-200">
+                <p>
+                  {r.fromName} → {r.toName}:{" "}
+                  <span className="text-amber-100">{r.amount} MON</span>
+                  {r.note ? ` · ${r.note}` : ""}
+                </p>
+                <div className="mt-1 flex gap-1">
+                  {iAmPayer && (
+                    <>
+                      <button
+                        className="btn-primary !px-2 !py-1 text-[11px]"
+                        disabled={busy}
+                        onClick={() => void resolveRequest(r.id, "pay")}
+                      >
+                        Pay
+                      </button>
                       <button
                         className="btn-ghost !px-2 !py-1 text-[11px]"
                         disabled={busy}
-                        onClick={() => void resolveRequest(r.id, "cancel")}
+                        onClick={() => void resolveRequest(r.id, "decline")}
                       >
-                        Cancel
+                        Decline
                       </button>
-                    )}
-                    {!iRequested && !theyRequested && iAmPayer && amRecipient ? null : null}
-                  </div>
+                    </>
+                  )}
+                  {iRequested && (
+                    <button
+                      className="btn-ghost !px-2 !py-1 text-[11px]"
+                      disabled={busy}
+                      onClick={() => void resolveRequest(r.id, "cancel")}
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
-              );
-            })}
+              </div>
+            );
+          })}
         </div>
       )}
 
