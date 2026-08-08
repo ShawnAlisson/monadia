@@ -61,10 +61,18 @@ const AGENT_BUILDING_SLOTS: Record<AgentDistrict, readonly Vec2[]> = {
 };
 
 function districtForAgent(c: Citizen): AgentDistrict {
-  if (c.occupation === "Farmer") return "FARM";
+  if (c.occupation === "Farmer" || c.occupation === "Chef") return "FARM";
   if (c.occupation === "Industrialist") return "MINE";
-  if (c.occupation === "Engineer") return "PLANT";
-  if (c.occupation === "Revolutionary" || c.occupation === "Conservative") return "GOVERNMENT";
+  if (c.occupation === "Engineer" || c.occupation === "Architect") return "PLANT";
+  if (
+    c.occupation === "Revolutionary" ||
+    c.occupation === "Conservative" ||
+    c.occupation === "Journalist" ||
+    c.occupation === "Librarian" ||
+    c.occupation === "Psychologist"
+  ) {
+    return "GOVERNMENT";
+  }
   return "MARKET";
 }
 

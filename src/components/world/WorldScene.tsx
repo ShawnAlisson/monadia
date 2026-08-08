@@ -518,7 +518,14 @@ function AgentBuilding({
   const roll = rand(citizen.id, 31);
   const color = roll > 0.66 ? "#b085f5" : roll > 0.33 ? "#5ab6f0" : "#3de6c1";
   const height = 2.3 + rand(citizen.id, 44) * 2.1;
-  const roof = citizen.occupation === "Engineer" ? "reactor" : citizen.occupation === "Farmer" ? "greenhouse" : citizen.occupation === "Industrialist" ? "foundry" : "signal";
+  const roof =
+    citizen.occupation === "Engineer" || citizen.occupation === "Architect"
+      ? "reactor"
+      : citizen.occupation === "Farmer" || citizen.occupation === "Chef"
+        ? "greenhouse"
+        : citizen.occupation === "Industrialist"
+          ? "foundry"
+          : "signal";
 
   useFrame(({ clock }) => {
     if (!beacon.current) return;
@@ -588,7 +595,7 @@ function AgentBuilding({
       </group>
       {(hovered || selected) && <pointLight position={[0, height + 0.4, 0]} color={color} intensity={2.6} distance={6} />}
       {(hovered || selected) && (
-        <TextSprite text={`AI BUILDING · ${citizen.name}`} color="#c8fff5" height={0.62} position={[0, height + 1.45, 0]} />
+        <TextSprite text={citizen.name} color="#c8fff5" height={0.62} position={[0, height + 1.45, 0]} />
       )}
     </group>
   );

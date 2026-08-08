@@ -134,6 +134,118 @@ const BY_OCCUPATION: Record<Occupation, AgentSkill[]> = {
       promptHint: "Advise on hiring with ROI framing.",
     },
   ],
+  Poet: [
+    {
+      id: "city-verse",
+      name: "City Verse",
+      description: "Commission a short poem about MONADIA or a citizen.",
+      promptHint: "Write 4-8 lines of vivid poetry. Stay warm and concrete.",
+    },
+    {
+      id: "market-ode",
+      name: "Market Ode",
+      description: "Turn today's prices into a lyrical toast or warning.",
+      promptHint: "Make Food, Iron, or Energy feel mythic in a short ode.",
+    },
+  ],
+  Psychologist: [
+    {
+      id: "stress-check",
+      name: "Stress Check",
+      description: "Talk through FOMO, loss fear, or overtrading urges.",
+      promptHint: "Be a calm psychologist. Name the feeling and one grounding move.",
+    },
+    {
+      id: "decision-frame",
+      name: "Decision Frame",
+      description: "Reframe a tough hire, sell, or vote decision.",
+      promptHint: "Separate emotion from evidence in 3 short steps.",
+    },
+  ],
+  Doctor: [
+    {
+      id: "shift-plan",
+      name: "Shift Plan",
+      description: "Plan a sustainable work/rest cycle for agents and humans.",
+      promptHint: "Give practical stamina advice tied to city labor.",
+    },
+    {
+      id: "triage-note",
+      name: "Triage Note",
+      description: "Prioritize who needs help first in a busy district.",
+      promptHint: "Triage like a clinic: urgent vs can wait.",
+    },
+  ],
+  Librarian: [
+    {
+      id: "lore-lookup",
+      name: "Lore Lookup",
+      description: "Recall civic rules, districts, or past market patterns.",
+      promptHint: "Answer like a librarian citing MONADIA lore briefly.",
+    },
+    {
+      id: "reading-list",
+      name: "Reading List",
+      description: "Suggest 3 'readings' (topics) before a big decision.",
+      promptHint: "Give a tiny curated reading list of city topics.",
+    },
+  ],
+  Banker: [
+    {
+      id: "budget-split",
+      name: "Budget Split",
+      description: "Allocate MON across spend, reserve, and opportunity.",
+      promptHint: "Be a prudent banker with clear percentages.",
+    },
+    {
+      id: "credit-check",
+      name: "Credit Check",
+      description: "Judge whether a hire or transfer looks affordable.",
+      promptHint: "Approve or caution a spend with one reason.",
+    },
+  ],
+  Architect: [
+    {
+      id: "district-sketch",
+      name: "District Sketch",
+      description: "Suggest how to improve a plaza or production district.",
+      promptHint: "Speak like an architect about flow, landmarks, and density.",
+    },
+    {
+      id: "build-brief",
+      name: "Build Brief",
+      description: "Outline a Farm, Factory, or Plant placement idea.",
+      promptHint: "Give a compact building brief with site rationale.",
+    },
+  ],
+  Journalist: [
+    {
+      id: "headline",
+      name: "Headline",
+      description: "Get a sharp headline about the latest city event.",
+      promptHint: "Write one punchy headline and a one-sentence lede.",
+    },
+    {
+      id: "field-report",
+      name: "Field Report",
+      description: "Summarize who is winning Food, Iron, or Energy right now.",
+      promptHint: "File a terse field report with one non-obvious angle.",
+    },
+  ],
+  Chef: [
+    {
+      id: "menu-plan",
+      name: "Menu Plan",
+      description: "Turn Food inventory into a morale-boosting menu.",
+      promptHint: "Be a chef: practical Food use that lifts the city.",
+    },
+    {
+      id: "surplus-recipe",
+      name: "Surplus Recipe",
+      description: "Advise when to cook vs sell Food into the market.",
+      promptHint: "Recommend cook vs sell with a short recipe metaphor.",
+    },
+  ],
 };
 
 export function getAgentSkills(occupation: Occupation): AgentSkill[] {

@@ -17,7 +17,15 @@ export type Occupation =
   | "Farmer"
   | "Engineer"
   | "Trader"
-  | "Entrepreneur";
+  | "Entrepreneur"
+  | "Poet"
+  | "Psychologist"
+  | "Doctor"
+  | "Librarian"
+  | "Banker"
+  | "Architect"
+  | "Journalist"
+  | "Chef";
 
 export type ResourceId = 0 | 1 | 2;
 

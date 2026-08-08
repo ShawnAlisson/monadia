@@ -120,8 +120,7 @@ export default function WorldPage() {
             {selected.kind === "citizen" ? (
               <>
                 <p className="font-[family-name:var(--font-display)] text-lg tracking-wide text-cyan-100">
-                  {selected.citizen.type === "AI" ? "🏢 AI BUILDING" : "👤 HUMAN CITIZEN"} ·{" "}
-                  {selected.citizen.name}
+                  {selected.citizen.type === "AI" ? "🏢" : "👤"} {selected.citizen.name}
                 </p>
                 <p className="text-xs text-slate-400">
                   {selected.citizen.occupation} · {selected.citizen.personality}

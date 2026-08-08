@@ -177,6 +177,30 @@ async function ensureProposal() {
     ON CONFLICT (id) DO NOTHING`;
 }
 
+/** Rename legacy person-name agents to meaningful place names (idempotent). */
+async function ensureAgentPlaceNames() {
+  await ensureDatabase();
+  const sql = getSql();
+  const lock = await sql<{ key: string }[]>`INSERT INTO meta (key, value)
+    VALUES ('agent_place_names_v1', ${String(now())}) ON CONFLICT (key) DO NOTHING RETURNING key`;
+  if (!lock.length) return;
+  const seeds = getAgentSeeds(24);
+  const timestamp = now();
+  await sql.transaction((tx: typeof sql) =>
+    seeds.map((seed, index) => {
+      const id = `ai-${index}`;
+      return tx`UPDATE citizens SET
+        name = ${seed.name},
+        personality = ${seed.personality},
+        occupation = ${seed.occupation},
+        goal = ${seed.goal},
+        last_reasoning = ${`${seed.name} is open for citizens.`},
+        updated_at = ${timestamp}
+        WHERE id = ${id} AND type = 'AI'`;
+    }),
+  );
+}
+
 /** Idempotently initializes the shared Postgres world. */
 async function seedWorld() {
   await ensureMarketRow();
@@ -225,6 +249,7 @@ async function seedWorld() {
     });
   }
   await ensureProposal();
+  await ensureAgentPlaceNames();
 }
 
 export async function ensureSeeded() {
