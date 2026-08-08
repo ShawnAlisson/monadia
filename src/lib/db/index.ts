@@ -141,6 +141,31 @@ export async function ensureDatabase() {
         tx_hash TEXT PRIMARY KEY,
         claimed_at BIGINT NOT NULL
       )`;
+      // Presence + social layer (safe to re-run on warm serverless instances).
+      await sql`ALTER TABLE citizens ADD COLUMN IF NOT EXISTS world_x DOUBLE PRECISION`;
+      await sql`ALTER TABLE citizens ADD COLUMN IF NOT EXISTS world_z DOUBLE PRECISION`;
+      await sql`ALTER TABLE citizens ADD COLUMN IF NOT EXISTS last_seen_at BIGINT`;
+      await sql`CREATE TABLE IF NOT EXISTS social_messages (
+        id TEXT PRIMARY KEY,
+        from_id TEXT NOT NULL,
+        to_id TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at BIGINT NOT NULL,
+        read_at BIGINT
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS social_messages_to_created_idx ON social_messages (to_id, created_at DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS social_messages_pair_idx ON social_messages (from_id, to_id, created_at DESC)`;
+      await sql`CREATE TABLE IF NOT EXISTS money_requests (
+        id TEXT PRIMARY KEY,
+        from_id TEXT NOT NULL,
+        to_id TEXT NOT NULL,
+        amount DOUBLE PRECISION NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'declined', 'cancelled')),
+        created_at BIGINT NOT NULL,
+        resolved_at BIGINT
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS money_requests_to_status_idx ON money_requests (to_id, status, created_at DESC)`;
     })().catch((error) => {
       // A transient Neon/network failure must not poison a warm Vercel
       // function forever; the next request can safely retry initialization.

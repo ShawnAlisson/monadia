@@ -50,9 +50,40 @@ export type Citizen = {
   employerId?: string | null;
   mapX: number;
   mapY: number;
+  /** Live/last world coordinates in the 3D city (not the 1..8 map grid). */
+  worldX: number | null;
+  worldZ: number | null;
+  /** Last presence heartbeat from the client (ms epoch). */
+  lastSeenAt: number | null;
+  /** True when lastSeenAt is recent enough to count as online. */
+  online: boolean;
   lastReasoning?: string | null;
   createdAt: number;
   updatedAt: number;
+};
+
+export type SocialMessage = {
+  id: string;
+  fromId: string;
+  fromName: string;
+  toId: string;
+  toName: string;
+  body: string;
+  createdAt: number;
+  readAt: number | null;
+};
+
+export type MoneyRequest = {
+  id: string;
+  fromId: string;
+  fromName: string;
+  toId: string;
+  toName: string;
+  amount: number;
+  note: string;
+  status: "pending" | "paid" | "declined" | "cancelled";
+  createdAt: number;
+  resolvedAt: number | null;
 };
 
 export type CivilizationEvent = {

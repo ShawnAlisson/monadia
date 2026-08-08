@@ -9,8 +9,13 @@ import type {
   CivilizationEvent,
   MarketState,
   Metrics,
+  MoneyRequest,
   Proposal,
+  SocialMessage,
 } from "@/lib/types";
+
+/** Humans count as online if they heartbeated within this window. */
+export const PRESENCE_ONLINE_MS = 20_000;
 
 type CitizenRow = {
   id: string;
@@ -31,6 +36,9 @@ type CitizenRow = {
   wallet_index: number | string | null;
   map_x: number | string;
   map_y: number | string;
+  world_x: number | string | null;
+  world_z: number | string | null;
+  last_seen_at: number | string | null;
   last_reasoning: string | null;
   created_at: number | string;
   updated_at: number | string;
@@ -55,6 +63,10 @@ const globalForStore = globalThis as typeof globalThis & {
 };
 
 function mapCitizen(row: CitizenRow): Citizen {
+  const lastSeenAt =
+    row.last_seen_at == null || row.last_seen_at === ""
+      ? null
+      : asNumber(row.last_seen_at);
   return {
     id: row.id,
     name: row.name,
@@ -71,6 +83,10 @@ function mapCitizen(row: CitizenRow): Citizen {
     employerId: row.employer_id,
     mapX: asNumber(row.map_x),
     mapY: asNumber(row.map_y),
+    worldX: row.world_x == null || row.world_x === "" ? null : asNumber(row.world_x),
+    worldZ: row.world_z == null || row.world_z === "" ? null : asNumber(row.world_z),
+    lastSeenAt,
+    online: lastSeenAt != null && Date.now() - lastSeenAt < PRESENCE_ONLINE_MS,
     lastReasoning: row.last_reasoning,
     createdAt: asNumber(row.created_at),
     updatedAt: asNumber(row.updated_at),
@@ -554,4 +570,309 @@ export async function getDashboardSnapshot() {
     getMetrics(), getMarket(), listEvents(30), listCitizens("ALL"), listBusinesses(), listProposals(),
   ]);
   return { metrics, market, events, citizens, businesses, proposals };
+}
+
+export async function updateCitizenPresence(
+  walletAddress: string,
+  worldX: number,
+  worldZ: number,
+): Promise<Citizen | null> {
+  await ensureDatabase();
+  const citizen = await getCitizenByWallet(walletAddress);
+  if (!citizen || citizen.type !== "HUMAN") return null;
+  const x = Math.max(-54, Math.min(54, worldX));
+  const z = Math.max(-54, Math.min(54, worldZ));
+  const timestamp = now();
+  const sql = getSql();
+  await sql`UPDATE citizens SET
+    world_x = ${x}, world_z = ${z}, last_seen_at = ${timestamp}, updated_at = ${timestamp}
+    WHERE id = ${citizen.id}`;
+  return getCitizen(citizen.id);
+}
+
+export async function sendSocialMessage(
+  fromWallet: string,
+  toCitizenId: string,
+  body: string,
+): Promise<SocialMessage> {
+  const [from, to] = await Promise.all([
+    getCitizenByWallet(fromWallet),
+    getCitizen(toCitizenId),
+  ]);
+  if (!from || from.type !== "HUMAN") throw new Error("Join as a human citizen first");
+  if (!to || to.type !== "HUMAN") throw new Error("You can only message human citizens");
+  if (from.id === to.id) throw new Error("Cannot message yourself");
+  const text = body.trim();
+  if (!text) throw new Error("Message is empty");
+  const id = randomUUID();
+  const timestamp = now();
+  const sql = getSql();
+  await sql`INSERT INTO social_messages (id, from_id, to_id, body, created_at)
+    VALUES (${id}, ${from.id}, ${to.id}, ${text}, ${timestamp})`;
+  await addEvent({
+    kind: "MESSAGE",
+    actorName: from.name,
+    actorType: "HUMAN",
+    message: `${from.name} messaged ${to.name}`,
+    meta: { toId: to.id, preview: text.slice(0, 80) },
+  });
+  return {
+    id,
+    fromId: from.id,
+    fromName: from.name,
+    toId: to.id,
+    toName: to.name,
+    body: text,
+    createdAt: timestamp,
+    readAt: null,
+  };
+}
+
+export async function listConversation(
+  walletAddress: string,
+  otherCitizenId: string,
+  limit = 40,
+): Promise<SocialMessage[]> {
+  const me = await getCitizenByWallet(walletAddress);
+  if (!me) return [];
+  const sql = getSql();
+  const rows = await sql<{
+    id: string;
+    from_id: string;
+    to_id: string;
+    body: string;
+    created_at: number | string;
+    read_at: number | string | null;
+    from_name: string;
+    to_name: string;
+  }[]>`
+    SELECT m.*, f.name AS from_name, t.name AS to_name
+    FROM social_messages m
+    JOIN citizens f ON f.id = m.from_id
+    JOIN citizens t ON t.id = m.to_id
+    WHERE (m.from_id = ${me.id} AND m.to_id = ${otherCitizenId})
+       OR (m.from_id = ${otherCitizenId} AND m.to_id = ${me.id})
+    ORDER BY m.created_at DESC
+    LIMIT ${limit}`;
+  // Mark inbound as read
+  await sql`UPDATE social_messages SET read_at = ${now()}
+    WHERE to_id = ${me.id} AND from_id = ${otherCitizenId} AND read_at IS NULL`;
+  return rows
+    .map((row) => ({
+      id: row.id,
+      fromId: row.from_id,
+      fromName: row.from_name,
+      toId: row.to_id,
+      toName: row.to_name,
+      body: row.body,
+      createdAt: asNumber(row.created_at),
+      readAt: row.read_at == null ? null : asNumber(row.read_at),
+    }))
+    .reverse();
+}
+
+export async function listInbox(walletAddress: string, limit = 30): Promise<SocialMessage[]> {
+  const me = await getCitizenByWallet(walletAddress);
+  if (!me) return [];
+  const sql = getSql();
+  const rows = await sql<{
+    id: string;
+    from_id: string;
+    to_id: string;
+    body: string;
+    created_at: number | string;
+    read_at: number | string | null;
+    from_name: string;
+    to_name: string;
+  }[]>`
+    SELECT m.*, f.name AS from_name, t.name AS to_name
+    FROM social_messages m
+    JOIN citizens f ON f.id = m.from_id
+    JOIN citizens t ON t.id = m.to_id
+    WHERE m.to_id = ${me.id} OR m.from_id = ${me.id}
+    ORDER BY m.created_at DESC
+    LIMIT ${limit}`;
+  return rows.map((row) => ({
+    id: row.id,
+    fromId: row.from_id,
+    fromName: row.from_name,
+    toId: row.to_id,
+    toName: row.to_name,
+    body: row.body,
+    createdAt: asNumber(row.created_at),
+    readAt: row.read_at == null ? null : asNumber(row.read_at),
+  }));
+}
+
+export async function transferWorldMon(
+  fromWallet: string,
+  toCitizenId: string,
+  amount: number,
+  note?: string,
+): Promise<{ from: Citizen; to: Citizen }> {
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Amount must be positive");
+  if (amount > 1_000_000) throw new Error("Amount too large");
+  const [from, to] = await Promise.all([
+    getCitizenByWallet(fromWallet),
+    getCitizen(toCitizenId),
+  ]);
+  if (!from || from.type !== "HUMAN") throw new Error("Join as a human citizen first");
+  if (!to || to.type !== "HUMAN") throw new Error("You can only send world MON to humans");
+  if (from.id === to.id) throw new Error("Cannot send to yourself");
+  if (from.balance < amount) throw new Error("Insufficient world MON balance");
+
+  const rounded = Math.round(amount * 1000) / 1000;
+  await updateCitizenState(from.id, { balance: from.balance - rounded });
+  await updateCitizenState(to.id, { balance: to.balance + rounded });
+  const label = note?.trim() ? ` — “${note.trim().slice(0, 60)}”` : "";
+  await addEvent({
+    kind: "TRANSFER",
+    actorName: from.name,
+    actorType: "HUMAN",
+    message: `${from.name} sent ${rounded.toFixed(3)} MON to ${to.name}${label}`,
+    meta: { toId: to.id, amount: rounded },
+  });
+  const [nextFrom, nextTo] = await Promise.all([getCitizen(from.id), getCitizen(to.id)]);
+  if (!nextFrom || !nextTo) throw new Error("Transfer recorded but citizens could not be reloaded");
+  return { from: nextFrom, to: nextTo };
+}
+
+export async function createMoneyRequest(
+  fromWallet: string,
+  toCitizenId: string,
+  amount: number,
+  note = "",
+): Promise<MoneyRequest> {
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Amount must be positive");
+  const [from, to] = await Promise.all([
+    getCitizenByWallet(fromWallet),
+    getCitizen(toCitizenId),
+  ]);
+  if (!from || from.type !== "HUMAN") throw new Error("Join as a human citizen first");
+  if (!to || to.type !== "HUMAN") throw new Error("You can only request from humans");
+  if (from.id === to.id) throw new Error("Cannot request from yourself");
+  const rounded = Math.round(amount * 1000) / 1000;
+  const id = randomUUID();
+  const timestamp = now();
+  const sql = getSql();
+  await sql`INSERT INTO money_requests (id, from_id, to_id, amount, note, status, created_at)
+    VALUES (${id}, ${from.id}, ${to.id}, ${rounded}, ${note.trim().slice(0, 120)}, 'pending', ${timestamp})`;
+  await addEvent({
+    kind: "MONEY_REQUEST",
+    actorName: from.name,
+    actorType: "HUMAN",
+    message: `${from.name} requested ${rounded.toFixed(3)} MON from ${to.name}`,
+    meta: { toId: to.id, amount: rounded, requestId: id },
+  });
+  return {
+    id,
+    fromId: from.id,
+    fromName: from.name,
+    toId: to.id,
+    toName: to.name,
+    amount: rounded,
+    note: note.trim().slice(0, 120),
+    status: "pending",
+    createdAt: timestamp,
+    resolvedAt: null,
+  };
+}
+
+export async function listMoneyRequests(walletAddress: string): Promise<MoneyRequest[]> {
+  const me = await getCitizenByWallet(walletAddress);
+  if (!me) return [];
+  const sql = getSql();
+  const rows = await sql<{
+    id: string;
+    from_id: string;
+    to_id: string;
+    amount: number | string;
+    note: string;
+    status: MoneyRequest["status"];
+    created_at: number | string;
+    resolved_at: number | string | null;
+    from_name: string;
+    to_name: string;
+  }[]>`
+    SELECT r.*, f.name AS from_name, t.name AS to_name
+    FROM money_requests r
+    JOIN citizens f ON f.id = r.from_id
+    JOIN citizens t ON t.id = r.to_id
+    WHERE r.from_id = ${me.id} OR r.to_id = ${me.id}
+    ORDER BY r.created_at DESC
+    LIMIT 40`;
+  return rows.map((row) => ({
+    id: row.id,
+    fromId: row.from_id,
+    fromName: row.from_name,
+    toId: row.to_id,
+    toName: row.to_name,
+    amount: asNumber(row.amount),
+    note: row.note || "",
+    status: row.status,
+    createdAt: asNumber(row.created_at),
+    resolvedAt: row.resolved_at == null ? null : asNumber(row.resolved_at),
+  }));
+}
+
+export async function resolveMoneyRequest(
+  walletAddress: string,
+  requestId: string,
+  action: "pay" | "decline" | "cancel",
+): Promise<MoneyRequest> {
+  const me = await getCitizenByWallet(walletAddress);
+  if (!me) throw new Error("Join as a human citizen first");
+  const sql = getSql();
+  const [row] = await sql<{
+    id: string;
+    from_id: string;
+    to_id: string;
+    amount: number | string;
+    note: string;
+    status: MoneyRequest["status"];
+    created_at: number | string;
+    resolved_at: number | string | null;
+  }[]>`SELECT * FROM money_requests WHERE id = ${requestId} LIMIT 1`;
+  if (!row) throw new Error("Request not found");
+  if (row.status !== "pending") throw new Error("Request is already resolved");
+
+  const timestamp = now();
+  if (action === "cancel") {
+    if (row.from_id !== me.id) throw new Error("Only the requester can cancel");
+    await sql`UPDATE money_requests SET status = 'cancelled', resolved_at = ${timestamp} WHERE id = ${requestId}`;
+  } else if (action === "decline") {
+    if (row.to_id !== me.id) throw new Error("Only the recipient can decline");
+    await sql`UPDATE money_requests SET status = 'declined', resolved_at = ${timestamp} WHERE id = ${requestId}`;
+  } else {
+    if (row.to_id !== me.id) throw new Error("Only the recipient can pay");
+    const payer = await getCitizen(me.id);
+    const amount = asNumber(row.amount);
+    if (!payer || payer.balance < amount) throw new Error("Insufficient world MON balance");
+    const payee = await getCitizen(row.from_id);
+    if (!payee) throw new Error("Requester no longer exists");
+    await updateCitizenState(payer.id, { balance: payer.balance - amount });
+    await updateCitizenState(payee.id, { balance: payee.balance + amount });
+    await sql`UPDATE money_requests SET status = 'paid', resolved_at = ${timestamp} WHERE id = ${requestId}`;
+    await addEvent({
+      kind: "TRANSFER",
+      actorName: payer.name,
+      actorType: "HUMAN",
+      message: `${payer.name} paid ${amount.toFixed(3)} MON to ${payee.name} (request)`,
+      meta: { toId: payee.id, amount, requestId },
+    });
+  }
+
+  const [from, to] = await Promise.all([getCitizen(row.from_id), getCitizen(row.to_id)]);
+  return {
+    id: row.id,
+    fromId: row.from_id,
+    fromName: from?.name || "Citizen",
+    toId: row.to_id,
+    toName: to?.name || "Citizen",
+    amount: asNumber(row.amount),
+    note: row.note || "",
+    status: action === "pay" ? "paid" : action === "decline" ? "declined" : "cancelled",
+    createdAt: asNumber(row.created_at),
+    resolvedAt: timestamp,
+  };
 }
